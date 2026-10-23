@@ -186,3 +186,38 @@ def test_with_real_monitor(serve, fake_pi):
     assert code == 200
     assert json.loads(body.decode("utf-8")) == expected
     assert json.loads(body)["items"]["temp"]["reason"] == "48.3°C"
+
+
+# --- 동시 연결 제한 (Codex 검토 7) ---
+
+def test_connections_over_limit_are_closed_and_slots_come_back(serve, monkeypatch, caplog):
+    """느린 연결이 자리를 다 차지하면 그 위의 연결은 스레드를 만들지 않고 바로 닫는다.
+    느린 연결이 끝나면 다시 정상 응답한다."""
+    import socket
+    import time
+    from pimon import web
+    monkeypatch.setattr(web, "MAX_CONNECTIONS", 2)
+    base = serve(lambda: SAMPLE)
+    port = int(base.rsplit(":", 1)[1])
+    slow = [socket.create_connection(("127.0.0.1", port)) for _ in range(2)]   # 요청을 보내지 않음
+    try:
+        time.sleep(0.2)                                     # 서버가 두 연결을 받아 스레드를 띄울 때까지
+        before = threading.active_count()
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as extra:
+            extra.sendall(b"GET /api/status HTTP/1.0\r\n\r\n")
+            assert extra.recv(1024) == b""                  # 응답 없이 닫힘
+        assert threading.active_count() == before
+        assert "연결" in caplog.text
+    finally:
+        for s in slow:
+            s.close()
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            code, _, _ = fetch(base + "/api/status")
+            break
+        except OSError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.05)
+    assert code == 200

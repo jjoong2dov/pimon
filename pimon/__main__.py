@@ -2,7 +2,9 @@
 
   python3 -m pimon [--root /] [--config /etc/pimon/pimon.toml]   주기 실행 (SIGTERM·SIGINT 로 끝냄)
   python3 -m pimon ... --once          한 번 수집·판정해 JSON 으로 출력
-  python3 -m pimon ... --restore-led   기록 파일대로 LED 를 되돌림 (systemd ExecStopPost)
+  python3 -m pimon ... --restore-led   기록 파일대로 LED 를 되돌림
+  python3 -m pimon --restore-led --state-path /run/pimon/led.json
+                                       같은 일을 설정 파일 없이 (systemd ExecStopPost)
 """
 
 import argparse
@@ -28,7 +30,16 @@ def main(argv=None):
     mode.add_argument("--once", action="store_true", help="한 번 수집·판정해 JSON 으로 출력하고 끝낸다")
     mode.add_argument("--restore-led", action="store_true",
                       help="led.state_path 의 기록대로 LED 를 되돌리고 기록을 지운다 (기록이 없으면 아무것도 안 함)")
+    p.add_argument("--state-path",
+                   help="--restore-led 와 함께: 설정 파일을 읽지 않고 이 기록 파일대로 되돌린다 "
+                        "(ExecStopPost 가 실행 중 바뀌거나 깨진 설정에 막히지 않게)")
     a = p.parse_args(argv)
+    if a.state_path is not None and not a.restore_led:
+        p.error("--state-path 는 --restore-led 와 함께만 쓴다")
+
+    if a.state_path is not None:
+        _setup_logging()
+        return restore_led(a.root, a.state_path)
 
     try:
         cfg = config.load(a.config)
@@ -44,7 +55,7 @@ def main(argv=None):
 
     _setup_logging()
     if a.restore_led:
-        return restore_led(a.root, cfg)
+        return restore_led(a.root, cfg["led"]["state_path"])
     return serve(a.root, cfg)
 
 
@@ -55,9 +66,8 @@ def _setup_logging():
                             format="pimon: %(levelname)s %(message)s")
 
 
-def restore_led(root, cfg):
+def restore_led(root, path):
     """기록이 없으면 0 (정상 종료 뒤에도 ExecStopPost 로 불림). 기록이 깨졌거나 되돌리지 못하면 1."""
-    path = cfg["led"]["state_path"]
     try:
         done = restore_from_state(root, path)
     except StateError as e:

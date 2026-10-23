@@ -23,6 +23,12 @@ DEFAULTS = {
 }
 
 
+# interval_s 범위. 위: Event.wait 는 1e10 초쯤부터 OverflowError. 아래: 쉬지 않고 도는 것을 막는다
+# (시험은 0.05 로 돌린다).
+INTERVAL_MIN_S = 0.01
+INTERVAL_MAX_S = 86400
+
+
 class ConfigError(ValueError):
     pass
 
@@ -88,7 +94,7 @@ def _warn_crit(section, cfg, unit, lo=None, hi=None):
 
 
 def _check(cfg):
-    _num("interval_s", cfg["interval_s"], lo=0, lo_open=True)
+    _num("interval_s", cfg["interval_s"], lo=INTERVAL_MIN_S, hi=INTERVAL_MAX_S)
 
     bind = cfg["http"]["bind"]
     if not isinstance(bind, str) or not bind:

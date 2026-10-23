@@ -260,6 +260,31 @@ def test_restore_led_with_broken_record_fails_and_writes_nothing(fake_pi, state,
     assert state.exists()
 
 
+@pytest.mark.parametrize("broken", ["이건 toml 아님 = = =", '[led]\nstate_path = "/다른/곳.json"\n'])
+def test_sigkill_after_config_changed_restore_with_state_path(fake_pi, state, cfg, pimon, broken):
+    """Codex 검토 3: 실행 중 설정이 깨지거나 state_path 가 바뀐 뒤 SIGKILL 되어도,
+    --state-path 를 받은 --restore-led 는 설정을 읽지 않고 그 기록대로 되돌린다 (unit 의 ExecStopPost)."""
+    make(fake_pi, temp=82)
+    c = cfg()
+    proc = pimon(c)
+    wait_blinking(fake_pi, state)
+    c.write_text(broken)
+    proc.kill()
+    proc.wait(10)
+    assert trigger(fake_pi) == "none"
+
+    r = run_cli(fake_pi, c, "--restore-led", "--state-path", str(state))
+    assert r.returncode == 0, r.stderr
+    assert trigger(fake_pi) == "mmc0"
+    assert not state.exists()
+
+
+def test_state_path_only_with_restore_led(fake_pi, state, cfg):
+    r = run_cli(fake_pi, cfg(), "--once", "--state-path", str(state))
+    assert r.returncode == 2
+    assert "--state-path" in r.stderr
+
+
 def test_restore_led_with_bad_config_fails(fake_pi, tmp_path):
     p = tmp_path / "pimon.toml"
     p.write_text('[led]\nstate_path = "상대경로"\n')

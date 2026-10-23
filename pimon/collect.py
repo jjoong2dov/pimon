@@ -77,20 +77,29 @@ def collect_memory(root):
     }
 
 
-@_item
-def collect_disk(root, paths, statvfs=os.statvfs):
-    out = []
-    for p in paths:
+def _disk_one(root, p, statvfs):
+    try:
         st = statvfs(_path(root, p))
         used = st.f_blocks - st.f_bfree
         usable = used + st.f_bavail      # df 와 같은 식: root 예약분은 뺀다
         if st.f_blocks <= 0 or usable <= 0:
             raise ValueError(f"{p}: 크기가 0")
-        out.append({
-            "path": p,
-            "total_gb": round(st.f_blocks * st.f_frsize / 1024 ** 3, 1),
-            "used_pct": round(used / usable * 100, 1),
-        })
+    except Exception as e:
+        return {"path": p, "error": f"{type(e).__name__}: {e}"}
+    return {
+        "path": p,
+        "total_gb": round(st.f_blocks * st.f_frsize / 1024 ** 3, 1),
+        "used_pct": round(used / usable * 100, 1),
+    }
+
+
+@_item
+def collect_disk(root, paths, statvfs=os.statvfs):
+    """경로마다 따로 읽는다. 실패한 경로는 {"path", "error"} 로 남기고 나머지는 그대로 둔다
+    (한 경로의 실패가 다른 경로의 경고를 가리지 않게). 모든 경로가 실패하면 항목 전체가 오류."""
+    out = [_disk_one(root, p, statvfs) for p in paths]
+    if all("error" in d for d in out):
+        raise ValueError("; ".join(d["error"] for d in out))
     return out
 
 
@@ -110,9 +119,11 @@ def collect_link(root, iface):
     if state not in OPERSTATES:
         raise ValueError(f"{base}/operstate: 형식 오류 {state!r}")
     carrier = _optional_int(root, f"{base}/carrier")
+    # operstate 를 갖추지 않은 드라이버는 늘 "unknown". 그때는 carrier 로 정한다.
+    up = state == "up" or (state == "unknown" and carrier == 1)
     return {
         "iface": iface,
-        "up": state == "up",
+        "up": up,
         "carrier": None if carrier is None else carrier == 1,
         "speed_mbps": _optional_int(root, f"{base}/speed"),
     }

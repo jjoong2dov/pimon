@@ -1,4 +1,6 @@
 import copy
+import os
+from types import SimpleNamespace
 
 import pytest
 
@@ -106,6 +108,21 @@ def test_disk_worst_of_paths():
     assert reason == "/ 41.0%, /boot/firmware 85.0%, /data 10.0%"
 
 
+def test_disk_failed_path_does_not_hide_crit():
+    """Codex 검토 6: 없는 마운트 하나 + 임계치를 넘은 마운트 하나 → crit."""
+    v = item([{"path": "/", "total_gb": 29.1, "used_pct": 99.0},
+              {"path": "/data", "error": "FileNotFoundError: 없음"}])
+    level, reason = judge.judge_item("disk", v, DEFAULTS)
+    assert level == "crit"
+    assert reason == "/ 99.0%, /data 오류: FileNotFoundError: 없음"
+
+
+def test_disk_failed_path_with_others_ok_is_unknown():
+    v = item([{"path": "/", "total_gb": 29.1, "used_pct": 41.0},
+              {"path": "/data", "error": "FileNotFoundError: 없음"}])
+    assert judge.judge_item("disk", v, DEFAULTS)[0] == "unknown"
+
+
 def test_disk_uses_own_thresholds_not_memory():
     cfg = copy.deepcopy(DEFAULTS)
     cfg["disk"].update(warn_used_pct=50, crit_used_pct=60)
@@ -124,6 +141,17 @@ def test_link_up():
 def test_link_speed_not_judged(speed):
     v = {"iface": "eth0", "up": True, "carrier": True, "speed_mbps": speed}
     assert judge.judge_item("link", item(v), DEFAULTS)[0] == "ok"
+
+
+def test_judge_disk_on_fake_pi_with_missing_mount(fake_pi):
+    """수집 → 판정을 이어서: 없는 마운트가 있어도 99% 마운트의 crit 가 전체 판정에 남는다."""
+    full = SimpleNamespace(f_blocks=100, f_bfree=1, f_bavail=1, f_frsize=4096)
+    cfg = copy.deepcopy(DEFAULTS)
+    cfg["disk"]["paths"] = ["/", "/없는곳"]
+    statvfs = lambda p: full if os.path.isdir(p) else os.statvfs(p)
+    out = judge.judge_all(collect.collect_all(fake_pi, cfg, statvfs=statvfs), cfg)
+    assert out["items"]["disk"]["level"] == "crit"
+    assert out["overall"] == "crit"
 
 
 def test_link_down_is_crit():

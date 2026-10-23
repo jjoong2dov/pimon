@@ -12,6 +12,7 @@ get_status() 는 인자 없이 dict 또는 None(아직 수집 전)을 돌려준�
 
 import json
 import logging
+import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -21,6 +22,7 @@ log = logging.getLogger(__name__)
 
 PAGE_PATH = Path(__file__).with_name("page.html")
 ALLOW = "GET, HEAD"
+MAX_CONNECTIONS = 16      # 화면 몇 개 + curl 이면 충분. 느린 연결은 _Handler.timeout 뒤 자리를 내놓는다
 
 
 def _json_bytes(obj):
@@ -98,12 +100,32 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 class _Server(ThreadingHTTPServer):
+    """연결마다 스레드를 하나 띄우되, 동시에 MAX_CONNECTIONS 개까지만.
+    넘치는 연결은 스레드를 만들지 않고 바로 닫는다 (느린 연결을 잔뜩 열어 메모리를 채우지 못하게)."""
     daemon_threads = True
 
     def __init__(self, addr, get_status, page):
         self.get_status = get_status
         self.page = page
+        self._slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
         super().__init__(addr, _Handler)
+
+    def process_request(self, request, client_address):
+        if not self._slots.acquire(blocking=False):
+            log.warning("동시 연결 %d 개가 다 차 %s 연결을 닫음", MAX_CONNECTIONS, client_address[0])
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
 
 
 def make_server(get_status, bind, port):

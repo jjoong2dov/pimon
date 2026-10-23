@@ -49,9 +49,17 @@ def _memory(v, cfg):
 
 
 def _disk(v, cfg):
+    """경로별로 판정해 가장 나쁜 것. 못 읽은 경로는 unknown 이라 다른 경로의 warn·crit 를 가리지 않는다."""
     d = cfg["disk"]
-    level = worst(_by_threshold(p["used_pct"], d["warn_used_pct"], d["crit_used_pct"]) for p in v)
-    return level, ", ".join(f"{p['path']} {p['used_pct']:.1f}%" for p in v)
+
+    def one(p):
+        if "error" in p:
+            return "unknown", f"{p['path']} 오류: {p['error']}"
+        return (_by_threshold(p["used_pct"], d["warn_used_pct"], d["crit_used_pct"]),
+                f"{p['path']} {p['used_pct']:.1f}%")
+
+    judged = [one(p) for p in v]
+    return worst(l for l, _ in judged), ", ".join(r for _, r in judged)
 
 
 def _link(v, cfg):

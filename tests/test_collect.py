@@ -151,7 +151,21 @@ def test_disk_real_statvfs(fake_pi):
 
 
 def test_disk_missing_path_is_error(fake_pi):
-    bad(collect.collect_disk(fake_pi, ["/", "/없는곳"]), "없는곳")
+    bad(collect.collect_disk(fake_pi, ["/없는곳"]), "없는곳")
+
+
+def test_disk_one_path_failing_keeps_the_others(fake_pi):
+    """Codex 검토 6: 경로 하나가 실패해도 나머지 경로의 값은 남긴다 (경로별 error)."""
+    v = ok(collect.collect_disk(fake_pi, ["/", "/없는곳"],
+                                statvfs=lambda p: FakeStat(100, 1, 1) if os.path.isdir(p)
+                                else os.statvfs(p)))
+    assert v[0] == {"path": "/", "total_gb": 0.0, "used_pct": 99.0}
+    assert v[1]["path"] == "/없는곳" and "없는곳" in v[1]["error"]
+    assert "used_pct" not in v[1]
+
+
+def test_disk_all_paths_failing_is_error(fake_pi):
+    bad(collect.collect_disk(fake_pi, ["/없는곳", "/또없는곳"]), "없는곳", "또없는곳")
 
 
 def test_disk_statvfs_raises(fake_pi):
@@ -184,6 +198,24 @@ def test_link_down_kernel_style(fake_pi):
     (fake_pi / NET / "carrier").unlink()
     assert ok(collect.collect_link(fake_pi, "eth0")) == {
         "iface": "eth0", "up": False, "carrier": None, "speed_mbps": None}
+
+
+@pytest.mark.parametrize("carrier, want", [("1", True), ("0", False), (None, False)])
+def test_link_operstate_unknown_uses_carrier(fake_pi, carrier, want):
+    """Codex 검토 10: operstate 를 갖추지 않은 드라이버는 링크가 살아 있어도 'unknown' 을 준다.
+    그때는 carrier 로 정한다 (커널 문서 operstates: unknown 은 쓸 수 있는 것으로 본다)."""
+    (fake_pi / NET / "operstate").write_text("unknown\n")
+    if carrier is None:
+        (fake_pi / NET / "carrier").unlink()
+    else:
+        (fake_pi / NET / "carrier").write_text(carrier + "\n")
+    assert ok(collect.collect_link(fake_pi, "eth0"))["up"] is want
+
+
+@pytest.mark.parametrize("state", ["down", "lowerlayerdown", "dormant"])
+def test_link_not_up_even_with_carrier(fake_pi, state):
+    (fake_pi / NET / "operstate").write_text(state + "\n")
+    assert ok(collect.collect_link(fake_pi, "eth0"))["up"] is False
 
 
 def test_link_unknown_iface(fake_pi):

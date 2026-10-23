@@ -17,13 +17,16 @@ ExecStart=/usr/bin/python3 -m pimon --config /etc/pimon/pimon.toml
 # 정상 종료 뒤에도, 강제 종료(SIGKILL·OOM·예외로 죽음) 뒤에도 불린다.
 # 기록(/run/pimon/led.json)이 없으면 아무것도 하지 않고 0 으로 끝난다.
 # 정상 종료 때는 pimon 이 SIGTERM 처리기에서 이미 복구하고 기록을 지웠으므로 할 일이 없다.
-ExecStopPost=/usr/bin/python3 -m pimon --config /etc/pimon/pimon.toml --restore-led
+# --state-path 를 주면 설정 파일을 읽지 않는다. 실행 중 설정이 깨지거나 state_path 가 바뀐 뒤
+# 강제 종료돼도 복구가 막히지 않게 하려는 것. pimon.toml 의 [led] state_path 와 같아야 한다.
+ExecStopPost=/usr/bin/python3 -m pimon --restore-led --state-path /run/pimon/led.json
 Restart=on-failure
 RestartSec=5
 # SIGTERM 뒤 LED 복구까지 기다리는 시간. 넘기면 SIGKILL → ExecStopPost 가 복구한다.
 TimeoutStopSec=10
 
-# 기록 파일 폴더. pimon.toml 의 [led] state_path 와 맞출 것 (기본 /run/pimon/led.json).
+# 기록 파일 폴더. pimon.toml 의 [led] state_path 와 위 ExecStopPost 의 --state-path 를
+# 모두 맞출 것 (기본 /run/pimon/led.json).
 RuntimeDirectory=pimon
 RuntimeDirectoryMode=0755
 # 반드시 yes. 기본값(no)이면 서비스가 멈출 때마다 — 비정상 종료 뒤 Restart 할 때도 —
@@ -39,8 +42,10 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 # ProtectSystem=strict 는 / 전체를 읽기 전용으로 만든다 (/dev, /proc, /sys 는 제외).
-# RuntimeDirectory 는 자동으로 쓰기 가능하지만, state_path 를 바꾸거나 RuntimeDirectory 를 빼는
-# 경우를 위해 적어 둔다. 앞의 "-" 는 경로가 없어도 시작을 막지 않게 한다.
+# RuntimeDirectory 는 자동으로 쓰기 가능하지만, RuntimeDirectory 를 빼는 경우를 위해 적어 둔다.
+# 앞의 "-" 는 경로가 없어도 시작을 막지 않게 한다.
+# 주의: state_path 를 /run/pimon 밖으로 바꾸면 그 폴더도 여기에 더해야 한다. 안 그러면 기록을
+# 쓰지 못해 pimon 은 "LED 기록을 쓸 수 없음" 오류 로그를 남기고 LED 없이 돈다.
 ReadWritePaths=-/run/pimon
 # LED 폴더. /sys/class/leds/ACT 는 심볼릭 링크라 (파이 4: /sys/devices/platform/leds/leds/ACT)
 # 실제 경로를 적어야 할 수 있다. 파이에서 `readlink -f /sys/class/leds/ACT` 로 확인할 것.

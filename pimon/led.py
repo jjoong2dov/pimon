@@ -9,7 +9,8 @@ pimon 에서 /sys 에 쓰는 곳은 이 파일 하나뿐이다. 쓰기는 모두
 
 강제 종료(SIGKILL·OOM) 대비 기록 파일 (state_path, 기본 /run/pimon/led.json):
 - start(): 기록이 있으면 그것을 원래 상태로 쓰고(지금 LED 가 none 이어도), 지금 LED 가
-  기록과 다르면 곧바로 기록대로 되돌린다. 기록이 없으면 지금 상태를 원자적으로 적는다.
+  기록과 다르면 곧바로 기록대로 되돌린다(실패하면 다음 show 가 다시 한다).
+  기록이 없으면 지금 상태를 원자적으로 적는다.
   기록이 깨졌으면 경고 후 지금 상태로 다시 적는다.
 - 기록을 쓸 수 없으면(디렉터리를 만들어도 안 되면) LedError. LED 는 건드리지 않는다.
   기록 없이 깜빡이다 강제 종료되면 복구할 길이 없기 때문이다.
@@ -18,7 +19,7 @@ pimon 에서 /sys 에 쓰는 곳은 이 파일 하나뿐이다. 쓰기는 모두
 기록 파일 경로는 --root 아래로 붙이지 않는다 (/run 은 가짜 파이가 흉내 낼 대상이 아님).
 
 LED 를 읽지 못하면 start() 가 LedError 를 낸다. 원래 상태를 모르면 아무것도 쓰지 않는다.
-그 밖의 쓰기 실패는 로그만 남기고 밖으로 내지 않는다.
+그 밖의 쓰기 실패는 로그만 남기고 밖으로 내지 않으며, 다음 show(다음 tick)에서 다시 한다.
 """
 
 import json
@@ -198,16 +199,21 @@ class Led:
                 self._restore()
 
     def show(self, level):
-        """전체 판정에 맞춰 LED 를 바꾼다. 같은 판정이면 아무것도 하지 않는다."""
+        """전체 판정에 맞춰 LED 를 바꾼다. 같은 판정이고 지난번 쓰기가 다 됐으면 아무것도 하지 않는다.
+
+        지난번 쓰기가 실패했으면(복구 실패, trigger 쓰기 실패, 깜빡임 스레드가 끝남) 같은 판정이어도
+        다시 한다. show 는 tick 마다 불리므로 일시 실패는 다음 tick 에 풀린다.
+        """
         mode = level if level in self._periods else "ok"
         with self._lock:
-            if self.original is None or mode == self.mode:
+            if self.original is None or (mode == self.mode and self._settled()):
                 return
+            blinking = self.mode != "ok" and self._settled()    # trigger 가 이미 none
             self._halt_thread()
             if mode == "ok":
                 self._restore()
             else:
-                self._blink(mode)
+                self._blink(mode, set_trigger=not blinking)
             self.mode = mode
 
     def stop(self):
@@ -230,9 +236,17 @@ class Led:
             return True
         return self.original["trigger"] == "none" and current["brightness"] != self.original["brightness"]
 
-    def _blink(self, mode):
+    def _settled(self):
+        """지금 mode 대로 LED 가 되어 있다고 볼 수 있으면 True."""
+        if self.mode == "ok":
+            return not self._dirty
+        return self._thread is not None and self._thread.is_alive()
+
+    def _blink(self, mode, set_trigger):
+        """trigger 를 none 으로 쓴 뒤 깜빡임 스레드를 띄운다. trigger 쓰기가 실패하면 스레드 없이
+        돌아가고, _settled() 가 False 라 다음 show 가 다시 한다."""
         self._dirty = True
-        if self.mode == "ok" and not self._try_write("trigger", "none"):
+        if set_trigger and not self._try_write("trigger", "none"):
             return
         on, off = self._periods[mode]
         halt = threading.Event()

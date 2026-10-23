@@ -10,7 +10,8 @@ port = 8080
 [led]
 enabled = true
 # 시작 때 LED 원래 상태를 적는 파일 (강제 종료 뒤 복구용). --root 와 상관없는 실제 경로.
-# pimon.service 의 RuntimeDirectory=pimon (+ RuntimeDirectoryPreserve=yes) 과 맞출 것.
+# pimon.service 의 RuntimeDirectory=pimon (+ RuntimeDirectoryPreserve=yes), ExecStopPost 의
+# --state-path 와 맞출 것. /run/pimon 밖으로 옮기면 unit 의 ReadWritePaths 에도 더해야 한다.
 state_path = "/run/pimon/led.json"
 
 [temp]                 # 파이 4 펌웨어는 80°C 부터 클럭을 내림

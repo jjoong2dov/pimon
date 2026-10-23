@@ -135,6 +135,35 @@ def test_non_utf8_file_is_config_error(tmp_path):
     assert "UTF-8" in str(e.value)
 
 
+# Codex 검토 8: 너무 큰 값은 Event.wait 에서 OverflowError (1e10 부터), 너무 작은 값은 쉬지 않고 돈다.
+@pytest.mark.parametrize("value", ["1e308", "1e10", "86401", "0.009", "1e-300"])
+def test_interval_out_of_range_rejected(tmp_path, value):
+    with pytest.raises(ConfigError) as e:
+        load(write(tmp_path, f"interval_s = {value}\n"))
+    assert "interval_s" in str(e.value)
+
+
+@pytest.mark.parametrize("value", ["0.01", "0.05", "5", "86400"])
+def test_interval_range_edges_accepted(tmp_path, value):
+    assert load(write(tmp_path, f"interval_s = {value}\n"))["interval_s"] == float(value)
+
+
+def test_interval_max_is_below_event_wait_limit():
+    import threading
+    from pimon.config import INTERVAL_MAX_S
+    assert INTERVAL_MAX_S < threading.TIMEOUT_MAX
+
+
+def test_deploy_unit_restore_path_matches_default_state_path():
+    """Codex 검토 3: ExecStopPost 는 설정을 읽지 않으므로 --state-path 가 기본 state_path 와 같아야 한다."""
+    from pathlib import Path
+    unit = (Path(__file__).resolve().parents[1] / "deploy" / "pimon.service").read_text()
+    lines = [l for l in unit.splitlines() if l.startswith("ExecStopPost=")]
+    assert len(lines) == 1
+    assert f"--state-path {DEFAULTS['led']['state_path']}" in lines[0]
+    assert "--config" not in lines[0]
+
+
 def test_deploy_example_matches_defaults():
     from pathlib import Path
     assert load(Path(__file__).resolve().parents[1] / "deploy" / "pimon.toml") == DEFAULTS

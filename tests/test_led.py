@@ -266,6 +266,82 @@ def test_write_error_while_blinking_does_not_raise(fake_pi):
     assert trigger(fake_pi) == "mmc0"
 
 
+# --- 일시 쓰기 실패 뒤 다음 tick 에 다시 시도 (Codex 검토 1·2) ---
+
+def flaky_writes(led, fail):
+    """fail 에 든 (name, text) 쓰기를 한 번씩만 실패시킨다."""
+    real = led._write
+    pending = list(fail)
+
+    def write(name, text):
+        if (name, text) in pending:
+            pending.remove((name, text))
+            raise PermissionError("일시 실패")
+        real(name, text)
+
+    led._write = write
+    return pending
+
+
+def test_start_restore_failure_is_retried_on_next_ok(fake_pi):
+    """앞선 pimon 의 흔적(none)을 start() 가 되돌리다 실패하면, 다음 show("ok") 가 다시 한다."""
+    kill_while_blinking(fake_pi)
+    led = new_led(fake_pi)
+    flaky_writes(led, [("trigger", "mmc0")])
+    led.start()
+    assert trigger(fake_pi) == "none"
+    led.show("ok")
+    assert trigger(fake_pi) == "mmc0"
+    led.stop()
+
+
+def test_failed_restore_on_ok_is_retried_on_next_ok(fake_pi):
+    with new_led(fake_pi) as led:
+        led.show("crit")
+        flaky_writes(led, [("trigger", "mmc0")])
+        led.show("ok")
+        assert trigger(fake_pi) == "none"
+        led.show("ok")
+        assert trigger(fake_pi) == "mmc0"
+
+
+@pytest.mark.parametrize("level", ["warn", "crit"])
+def test_trigger_write_failure_is_retried_on_same_level(fake_pi, level):
+    with new_led(fake_pi) as led:
+        flaky_writes(led, [("trigger", "none")])
+        led.show(level)
+        assert trigger(fake_pi) == "mmc0"         # 아직 못 바꿈
+        led.show(level)                           # 같은 판정이어도 다시 시도
+        assert trigger(fake_pi) == "none"
+        seen = set()
+        assert wait_for(lambda: seen.add(brightness(fake_pi)) or seen >= {"0", "1"})
+
+
+@pytest.mark.parametrize("bad", [("brightness", "1"), ("brightness", "0")])
+def test_blink_thread_death_is_restarted_on_same_level(fake_pi, bad):
+    """첫 brightness(1) 또는 그다음(0) 쓰기가 실패해 스레드가 끝나도, 다음 tick 에 다시 깜빡인다."""
+    with new_led(fake_pi) as led:
+        flaky_writes(led, [bad])
+        led.show("crit")
+        assert wait_for(lambda: not led._thread.is_alive())
+        led.show("crit")
+        assert led._thread.is_alive()
+        assert trigger(fake_pi) == "none"
+        seen = set()
+        assert wait_for(lambda: seen.add(brightness(fake_pi)) or seen >= {"0", "1"})
+    assert trigger(fake_pi) == "mmc0"
+
+
+def test_switch_after_failed_trigger_write_sets_trigger(fake_pi):
+    """warn 에서 trigger 쓰기가 실패한 뒤 crit 로 바뀌면 crit 가 trigger 를 다시 쓴다."""
+    with new_led(fake_pi) as led:
+        flaky_writes(led, [("trigger", "none")])
+        led.show("warn")
+        led.show("crit")
+        assert trigger(fake_pi) == "none"
+        assert led._thread.is_alive()
+
+
 # --- 기록 파일 (강제 종료 대비) ---
 
 def read_record(root):
