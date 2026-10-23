@@ -103,3 +103,29 @@ def test_bad_config_raises(tmp_path, text, words):
     with pytest.raises(ConfigError) as e:
         load(p)
     assert words in str(e.value)
+
+
+# 검토 3: nan 은 모든 비교가 거짓이라 warn ≥ crit 검사도 지나가고 판정이 늘 ok 가 된다.
+@pytest.mark.parametrize("text, words", [
+    ("interval_s = inf\n", "interval_s"),
+    ("interval_s = nan\n", "interval_s"),
+    ("[temp]\nwarn_c = nan\n", "temp.warn_c"),
+    ("[temp]\ncrit_c = inf\n", "temp.crit_c"),
+    ("[temp]\nwarn_c = -inf\n", "temp.warn_c"),
+    ("[memory]\nwarn_used_pct = nan\n", "memory.warn_used_pct"),
+    ("[disk]\ncrit_used_pct = nan\n", "disk.crit_used_pct"),
+])
+def test_non_finite_numbers_rejected(tmp_path, text, words):
+    p = write(tmp_path, text)
+    with pytest.raises(ConfigError) as e:
+        load(p)
+    assert words in str(e.value)
+
+
+# 검토 8: UTF-8 이 아닌 파일은 날 UnicodeDecodeError 가 아니라 ConfigError 로 멈춘다.
+def test_non_utf8_file_is_config_error(tmp_path):
+    p = tmp_path / "pimon.toml"
+    p.write_bytes("# 주석\n[temp]\nwarn_c = 65\n".encode("euc-kr"))
+    with pytest.raises(ConfigError) as e:
+        load(p)
+    assert "UTF-8" in str(e.value)

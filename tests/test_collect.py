@@ -202,6 +202,18 @@ def test_system_missing_uptime(fake_pi):
     bad(collect.collect_system(fake_pi), "uptime")
 
 
+# 검토 3: float() 는 "nan"·"inf" 를 받아 준다. 그대로 두면 JSON 에 NaN 이 나간다.
+@pytest.mark.parametrize("rel, text", [
+    ("proc/loadavg", "nan 0.12 0.12 1/180 1234\n"),
+    ("proc/loadavg", "0.12 inf 0.12 1/180 1234\n"),
+    ("proc/uptime", "nan 100.00\n"),
+    ("proc/uptime", "inf 100.00\n"),
+])
+def test_system_non_finite_is_error(fake_pi, rel, text):
+    (fake_pi / rel).write_text(text)
+    bad(collect.collect_system(fake_pi), rel)
+
+
 # --- 모두 ---
 
 def test_collect_all_keys(fake_pi):

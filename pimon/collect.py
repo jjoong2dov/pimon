@@ -5,6 +5,7 @@
 """
 
 import functools
+import math
 import os
 
 THROTTLE_BITS = ["under_voltage", "freq_capped", "throttled", "soft_temp_limit"]
@@ -117,13 +118,21 @@ def collect_link(root, iface):
     }
 
 
+def _finite(text):
+    """float() 는 "nan"·"inf" 도 받아 주므로 따로 막는다 (JSON 에 NaN 이 나가지 않게)."""
+    v = float(text)
+    if not math.isfinite(v):
+        raise ValueError(text)
+    return v
+
+
 @_item
 def collect_system(root):
     load = _parse("proc/loadavg", _read(root, "proc/loadavg"),
-                  lambda t: [float(x) for x in t.split()[:3]])
+                  lambda t: [_finite(x) for x in t.split()[:3]])
     if len(load) != 3:
         raise ValueError(f"proc/loadavg: 형식 오류 {load!r}")
-    uptime = _parse("proc/uptime", _read(root, "proc/uptime"), lambda t: float(t.split()[0]))
+    uptime = _parse("proc/uptime", _read(root, "proc/uptime"), lambda t: _finite(t.split()[0]))
     return {"load1": load[0], "load5": load[1], "load15": load[2], "uptime_s": int(uptime)}
 
 

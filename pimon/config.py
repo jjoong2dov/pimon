@@ -5,6 +5,7 @@
 """
 
 import copy
+import math
 import tomllib
 
 DEFAULT_PATH = "/etc/pimon/pimon.toml"
@@ -31,6 +32,8 @@ def load(path=DEFAULT_PATH):
             data = tomllib.load(f)
     except FileNotFoundError:
         data = {}
+    except UnicodeDecodeError as e:
+        raise ConfigError(f"{path}: UTF-8 이 아님: {e}") from None
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"{path}: TOML 형식 오류: {e}") from None
     except OSError as e:
@@ -64,6 +67,8 @@ def _is_num(v):
 def _num(name, v, lo=None, hi=None, lo_open=False):
     if not _is_num(v):
         raise ConfigError(f"{name}: 숫자여야 함 ({v!r})")
+    if not math.isfinite(v):             # nan 은 모든 비교가 거짓이라 아래 검사를 지나간다
+        raise ConfigError(f"{name}: nan·inf 는 안 됨 ({v!r})")
     if lo is not None and (v <= lo if lo_open else v < lo):
         raise ConfigError(f"{name}: {'>' if lo_open else '≥'} {lo} 이어야 함 ({v!r})")
     if hi is not None and v > hi:

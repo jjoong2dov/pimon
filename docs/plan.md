@@ -132,6 +132,11 @@ iface = "eth0"
 - 깜빡임은 trigger 를 `none` 으로 두고 스레드가 `brightness` 에 0/1 을 쓰는 방식. (가짜 파이에는 timer trigger 의 `delay_on/off` 파일이 없어서 이 방식이 시험하기 쉽다.)
 - 판정이 ok 로 돌아오거나 프로그램이 끝나면(SIGTERM·SIGINT 포함) 원래 trigger 와 brightness 를 다시 쓴다.
 - `led.enabled = false` 면 LED 를 전혀 건드리지 않는다.
+- 복구는 trigger 를 먼저 쓰고, 원래 trigger 가 `none` 일 때만 brightness 를 쓴다 (커널은 brightness 0 쓰기에 trigger 를 떼어 버림).
+- LED 를 읽지 못하면(파일 없음, 형식 오류) 시작 때 `LedError`, 아무것도 쓰지 않는다.
+- **알려진 한계 (6단계 기준)**: SIGTERM 은 7단계 신호 처리 전까지 복구되지 않는다. SIGKILL·OOM·전원 차단은 프로세스 안에서 복구할 길이 없고,
+  깜빡이던 중이면 trigger 가 `none` 으로 남는다. 그 뒤 다시 시작한 pimon 은 `none` 을 원래 값으로 저장하므로 영영 `mmc0` 로 돌아가지 않는다
+  (`tests/test_led.py::test_restart_after_kill_restores_original` 이 xfail 로 기록). 대책은 결정 필요.
 
 ## 6. systemd
 
