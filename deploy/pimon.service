@@ -1,0 +1,20 @@
+[Unit]
+Description=pimon 라즈베리 파이 상태 모니터
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -m pimon run --config /etc/pimon/pimon.toml
+ExecReload=/bin/kill -HUP $MAINPID
+WorkingDirectory=/opt/pimon
+Restart=on-failure
+RestartSec=5
+# LED 를 쓰려면 root 가 필요하다. 대신 쓸 수 있는 곳을 좁힌다(/sys 는 strict 에서도 쓸 수 있음).
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
