@@ -1,13 +1,14 @@
 """HTTP: GET /api/status (JSON), GET / (page.html).
 
-make_server(get_status, bind, port) 는 서버 객체만 만들어 돌려준다 (serve 하지 않음).
+make_server(get_status, bind, port, interval_s) 는 서버 객체만 만들어 돌려준다 (serve 하지 않음).
 호출하는 쪽:
-    srv = make_server(monitor.status, "127.0.0.1", 8080)
+    srv = make_server(monitor.status, "127.0.0.1", 8080, interval_s=cfg["interval_s"])
     threading.Thread(target=srv.serve_forever).start()
     ...
     srv.shutdown(); srv.server_close()
 
 get_status() 는 인자 없이 dict 또는 None(아직 수집 전)을 돌려준다.
+/api/status 응답(503 포함)에는 interval_s 를 덧붙인다. 화면은 이 값으로 다음 갱신을 잡는다.
 """
 
 import json
@@ -17,6 +18,8 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from pimon.config import DEFAULTS
 
 log = logging.getLogger(__name__)
 
@@ -71,9 +74,10 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             status = self.server.get_status()
             if status is None:
-                self._error(HTTPStatus.SERVICE_UNAVAILABLE, "아직 수집 전")
+                self._send_json(HTTPStatus.SERVICE_UNAVAILABLE,
+                                {"error": "아직 수집 전", "interval_s": self.server.interval_s})
                 return
-            body = _json_bytes(status)
+            body = _json_bytes({**status, "interval_s": self.server.interval_s})
         except Exception:
             log.exception("get_status 실패")
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "상태를 만들지 못함")
@@ -91,7 +95,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     # --- 로그 ---
 
-    # 화면이 5초마다 묻으므로 요청마다 INFO 로 남기면 journald 가 찬다. 요청은 DEBUG, 오류만 WARNING.
+    # 화면이 interval_s 마다 묻으므로 요청마다 INFO 로 남기면 journald 가 찬다. 요청은 DEBUG, 오류만 WARNING.
     def log_message(self, format, *args):
         log.debug("%s %s", self.address_string(), format % args)
 
@@ -104,9 +108,10 @@ class _Server(ThreadingHTTPServer):
     넘치는 연결은 스레드를 만들지 않고 바로 닫는다 (느린 연결을 잔뜩 열어 메모리를 채우지 못하게)."""
     daemon_threads = True
 
-    def __init__(self, addr, get_status, page):
+    def __init__(self, addr, get_status, page, interval_s):
         self.get_status = get_status
         self.page = page
+        self.interval_s = interval_s
         self._slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
         super().__init__(addr, _Handler)
 
@@ -128,7 +133,7 @@ class _Server(ThreadingHTTPServer):
             self._slots.release()
 
 
-def make_server(get_status, bind, port):
+def make_server(get_status, bind, port, interval_s=DEFAULTS["interval_s"]):
     """서버 객체를 만들어 돌려준다. serve_forever 는 호출하는 쪽이 띄운다."""
     page = PAGE_PATH.read_bytes()
-    return _Server((bind, port), get_status, page)
+    return _Server((bind, port), get_status, page, interval_s)

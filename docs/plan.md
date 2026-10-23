@@ -21,7 +21,7 @@ pimon/
   monitor.py    Monitor: tick() = 수집→판정→현재 상태 저장(잠금), run() = 주기 반복, stop()
   led.py        ACT LED: 시작 때 원래 trigger·brightness 저장, 상태에 따라 깜빡임, 끝날 때 복구
   web.py        ThreadingHTTPServer: GET /api/status (JSON), GET / (page.html)
-  page.html     간단한 화면. 몇 초마다 /api/status 를 읽어 표로 보여 줌
+  page.html     간단한 화면. /api/status 의 interval_s 마다 읽어 표로 보여 줌 (최소 1초)
 deploy/
   pimon.service systemd 유닛 (root 로 실행, 보안 옵션으로 좁힘)
   pimon.toml    예시 설정 (기본값과 같은 내용)
@@ -69,9 +69,11 @@ tests/
                  "error": null, "level": "ok", "reason": "up"},
     "system":   {"value": {"load1": 0.12, "load5": 0.12, "load15": 0.12, "uptime_s": 3600},
                  "error": null, "level": "ok", "reason": ""}
-  }
+  },
+  "interval_s": 5
 }
 ```
+`interval_s` 는 web 이 설정값을 덧붙인 것이다 (수집 전 503 응답 `{"error": ..., "interval_s": 5}` 에도 들어감). 화면은 이 값으로 다음 갱신을 잡는다.
 
 ### 항목별 판정 규칙
 | 항목 | 규칙 |

@@ -105,7 +105,7 @@ def _start_extras(monitor, cfg, stack):
     """
     bind, port = cfg["http"]["bind"], cfg["http"]["port"]
     try:
-        srv = web.make_server(monitor.status, bind, port)
+        srv = web.make_server(monitor.status, bind, port, interval_s=cfg["interval_s"])
     except OSError as e:
         raise StartError(f"web {bind}:{port} 를 열 수 없음: {e}") from None
     stack.callback(srv.server_close)           # 나중에 불림
