@@ -32,29 +32,41 @@ rm -f "/tmp/pimon-$REL.tgz"
 (cd "$D" && python3 -m pimon check-config --config /etc/pimon/pimon.toml)
 
 OLD=$(readlink /opt/pimon/current || true)
-switch() {   # $1 판으로 current 를 바꾸고 서비스 다시 시작
-    sudo ln -sfn "$1" /opt/pimon/current.new && sudo mv -T /opt/pimon/current.new /opt/pimon/current
-    sudo cp "$1/deploy/pimon.service" /etc/systemd/system/pimon.service
-    sudo systemctl daemon-reload
-    sudo systemctl enable -q pimon
+
+# 여기부터는 set -e 를 끈다. 어느 단계에서 실패하든 아래 되돌리기까지 가야 한다.
+set +e
+switch() {   # $1 판으로 current 를 바꾸고 서비스 다시 시작. 모두 성공해야 0
+    sudo ln -sfn "$1" /opt/pimon/current.new && sudo mv -T /opt/pimon/current.new /opt/pimon/current &&
+    sudo cp "$1/deploy/pimon.service" /etc/systemd/system/pimon.service &&
+    sudo systemctl daemon-reload &&
+    sudo systemctl enable -q pimon &&
     sudo systemctl restart pimon
 }
-switch "$D"
-ok=0
-for i in 1 2 3 4 5; do
-    sleep 2
-    if (cd "$D" && python3 -m pimon health --config /etc/pimon/pimon.toml); then ok=1; break; fi
-done
-if [ $ok = 1 ]; then
+healthy() {  # 10초 안에 /status 가 응답하면 0
+    for i in 1 2 3 4 5; do
+        sleep 2
+        (cd /opt/pimon/current && python3 -m pimon health --config /etc/pimon/pimon.toml) && return 0
+    done
+    return 1
+}
+
+if switch "$D" && healthy; then
     [ -n "$OLD" ] && sudo ln -sfn "$OLD" /opt/pimon/previous
     echo "배포 완료: $REL"
     exit 0
 fi
-echo "새 판이 응답하지 않음. 최근 기록:"
-sudo journalctl -u pimon -n 20 --no-pager || true
-if [ -n "$OLD" ]; then
-    echo "전 판으로 되돌림: $OLD"
-    switch "$OLD"
+echo "새 판이 제대로 뜨지 않음. 최근 기록:"
+sudo journalctl -u pimon -n 20 --no-pager
+if [ -z "$OLD" ]; then
+    echo "처음 배포라 되돌릴 판이 없음. 서비스를 멈춤"
+    sudo systemctl disable --now pimon
+    exit 1
+fi
+echo "전 판으로 되돌림: $OLD"
+if switch "$OLD" && healthy; then
+    echo "전 판으로 되돌렸고 응답 정상"
+else
+    echo "전 판도 응답하지 않음. 손으로 확인 필요: sudo journalctl -u pimon"
 fi
 exit 1
 REMOTE

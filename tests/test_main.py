@@ -128,3 +128,30 @@ def test_health(pi, tmp_path, capsys):
         proc.terminate()
         proc.communicate(timeout=10)
     assert main.main(["health", "--config", str(cfgfile)]) == 1
+
+
+def test_many_hup_and_term_stress(pi, tmp_path):
+    """SIGHUP 을 연달아 보내다 SIGTERM. 30번 되풀이해 한 번도 멈추지 않아야 한다."""
+    for i in range(30):
+        proc, _ = start(pi, tmp_path, 18935, interval=30)
+        for _ in range(5):
+            proc.send_signal(signal.SIGHUP)
+        proc.send_signal(signal.SIGTERM)
+        try:
+            out = proc.communicate(timeout=10)[0]
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            raise AssertionError(f"{i}번째에 멈춤\n" + proc.communicate()[0])
+        assert proc.returncode == 0, out
+
+
+def test_reload_not_lost(pi, tmp_path):
+    from pimon.__main__ import Signals
+    sig = Signals.__new__(Signals)
+    sig.stop, sig.hups, sig.seen_hups = False, 0, 0
+    sig._on_hup()
+    hups = sig.hups
+    sig._on_hup()                 # take_reload 가 값을 읽은 직후 온 SIGHUP 이라고 치자
+    sig.seen_hups = hups
+    assert sig.take_reload() is True
+    assert sig.take_reload() is False

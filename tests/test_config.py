@@ -44,6 +44,7 @@ def test_file_overrides_only_given_keys(tmp_path):
     ('listen = "localhost:8080"\n', "IPv4"),
     ('disk_path = "/../etc"\n', r"\.\."),
     ('iface = "../x"\n', "iface 이름"),
+    ('[led]\nname = "../../x"\n', "led.name 이"),
 ])
 def test_bad_config(tmp_path, text, words):
     with pytest.raises(config.ConfigError, match=words if words.startswith("\\") else words.replace("[", r"\[").replace("]", r"\]")):

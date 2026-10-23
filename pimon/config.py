@@ -83,6 +83,9 @@ def validate(cfg):
         raise ConfigError(f"throttle_source 는 {', '.join(THROTTLE_SOURCES)} 중 하나: {cfg['throttle_source']!r}")
     if "/" in cfg["iface"] or cfg["iface"] in (".", ".."):
         raise ConfigError(f"iface 이름이 이상합니다: {cfg['iface']!r}")
+    name = cfg["led"]["name"]
+    if "/" in name or name in (".", ".."):
+        raise ConfigError(f"led.name 이 이상합니다: {name!r}")
     if ".." in PurePosixPath(cfg["disk_path"]).parts:
         raise ConfigError("disk_path 에 .. 는 쓸 수 없습니다")
     if not isinstance(cfg["led"]["enabled"], bool):

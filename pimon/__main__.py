@@ -62,7 +62,8 @@ class Signals:
 
     def __init__(self):
         self.stop = False      # 한 번 켜지면 끄지 않는다
-        self.reload = False
+        self.hups = 0          # 처리기는 늘리기만 하고, 고리는 본 값과 비교한다
+        self.seen_hups = 0
         self._r, w = os.pipe()
         os.set_blocking(self._r, False)
         os.set_blocking(w, False)
@@ -75,11 +76,19 @@ class Signals:
         self.stop = True
 
     def _on_hup(self, *_):
-        self.reload = True
+        self.hups += 1
+
+    def take_reload(self):
+        """지난번 뒤로 SIGHUP 이 왔으면 True. 사이에 몇 번 왔어도 한 번만 다시 읽으면 된다."""
+        hups = self.hups
+        if hups == self.seen_hups:
+            return False
+        self.seen_hups = hups
+        return True
 
     def wait(self, seconds):
         """seconds 동안 또는 시그널이 올 때까지 기다린다."""
-        if self.stop or self.reload:
+        if self.stop or self.hups != self.seen_hups:
             return
         select.select([self._r], [], [], seconds)
         try:
@@ -109,8 +118,7 @@ def cmd_run(cfg, config_path):
     last = None
     try:
         while not sig.stop:
-            if sig.reload:
-                sig.reload = False
+            if sig.take_reload():
                 _reload(cfg, config_path)
             snap = snapshot(cfg)
             state.set(snap)
@@ -165,7 +173,7 @@ def cmd_health(cfg):
 
 def cmd_restore_led(cfg):
     try:
-        done = ledmod.restore_saved(cfg["root"], cfg["led"]["name"], cfg["state_dir"])
+        done = ledmod.restore_saved(cfg["root"], cfg["state_dir"])
     except (OSError, ValueError) as e:
         print(f"LED 되돌리기 실패: {e}", file=sys.stderr)
         return 1

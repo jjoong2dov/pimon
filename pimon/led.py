@@ -47,6 +47,27 @@ def _read_state(path):
     return state
 
 
+KEYS = {"trigger", "delay_on", "delay_off", "brightness"}
+
+
+def _load_state(state_file):
+    """led.json 을 읽고 모양을 검사한다. 이상하면 ValueError."""
+    try:
+        data = json.loads(state_file.read_text())
+    except ValueError as e:
+        raise ValueError(f"{state_file}: JSON 이 아님: {e}") from None
+    if not isinstance(data, dict) or not isinstance(data.get("led"), str) \
+            or not isinstance(data.get("state"), dict):
+        raise ValueError(f"{state_file}: 모양이 이상함")
+    state = data["state"]
+    if not isinstance(state.get("trigger"), str) or not set(state) <= KEYS \
+            or not all(isinstance(state[k], str) and state[k].isdigit() for k in state if k != "trigger"):
+        raise ValueError(f"{state_file}: LED 상태 값이 이상함: {state!r}")
+    if "/" in data["led"] or data["led"] in (".", ".."):
+        raise ValueError(f"{state_file}: LED 이름이 이상함: {data['led']!r}")
+    return data["led"], state
+
+
 def _apply_state(path, state):
     (path / "trigger").write_text(f"{state['trigger']}\n")
     for name in ("delay_on", "delay_off", "brightness"):
@@ -56,16 +77,18 @@ def _apply_state(path, state):
 
 class Led:
     def __init__(self, root="/", name="auto", state_dir="/var/lib/pimon"):
-        self.path = find(root, name)
         self.state_file = Path(state_dir) / "led.json"
         if self.state_file.exists():
-            self.original = json.loads(self.state_file.read_text())
+            # 기록에 적힌 LED 를 쓴다. 그사이 설정의 LED 이름이 바뀌었어도 처음 LED 를 되돌린다.
+            saved_name, self.original = _load_state(self.state_file)
+            self.path = find(root, saved_name)
             self.recovered = True
         else:
+            self.path = find(root, name)
             self.original = _read_state(self.path)
             self.state_file.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.state_file.with_suffix(".tmp")
-            tmp.write_text(json.dumps(self.original))
+            tmp.write_text(json.dumps({"led": self.path.name, "state": self.original}))
             os.replace(tmp, self.state_file)
             self.recovered = False
         self.shown = None
@@ -100,11 +123,12 @@ class Led:
         self.shown = None
 
 
-def restore_saved(root="/", name="auto", state_dir="/var/lib/pimon"):
-    """led.json 이 남아 있으면 그 상태로 되돌린다. 되돌렸으면 True."""
+def restore_saved(root="/", state_dir="/var/lib/pimon"):
+    """led.json 이 남아 있으면 거기 적힌 LED 를 그 상태로 되돌린다. 되돌렸으면 True."""
     state_file = Path(state_dir) / "led.json"
     if not state_file.exists():
         return False
-    _apply_state(find(root, name), json.loads(state_file.read_text()))
+    name, state = _load_state(state_file)
+    _apply_state(find(root, name), state)
     state_file.unlink()
     return True

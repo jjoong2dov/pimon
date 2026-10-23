@@ -23,6 +23,10 @@ sudo cp "$PREV/deploy/pimon.service" /etc/systemd/system/pimon.service
 sudo systemctl daemon-reload
 sudo systemctl restart pimon
 sleep 3
-cd /opt/pimon/current && python3 -m pimon health --config /etc/pimon/pimon.toml
-echo "되돌림: $CUR -> $PREV"
+if (cd /opt/pimon/current && python3 -m pimon health --config /etc/pimon/pimon.toml); then
+    echo "되돌림: $CUR -> $PREV"
+else
+    echo "되돌린 판이 응답하지 않음. 손으로 확인 필요: sudo journalctl -u pimon"
+    exit 1
+fi
 REMOTE

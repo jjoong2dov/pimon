@@ -15,7 +15,7 @@ RestartSec=5
 StateDirectory=pimon
 
 # LED 파일이 root 소유라 root 로 돈다. 대신 root 의 특권(capability)은 모두 버리고,
-# /sys 는 LED 폴더만 쓸 수 있게 한다.
+# /sys 는 ACT LED 폴더만 쓸 수 있게 한다. root 로 도는 것은 남는 위험이다(12장).
 CapabilityBoundingSet=
 AmbientCapabilities=
 NoNewPrivileges=yes
@@ -25,7 +25,7 @@ PrivateTmp=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
-ReadWritePaths=-/sys/devices/platform/leds/leds
+ReadWritePaths=-/sys/devices/platform/leds/leds/ACT
 RestrictAddressFamilies=AF_INET AF_UNIX
 RestrictNamespaces=yes
 LockPersonality=yes

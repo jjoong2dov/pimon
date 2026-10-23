@@ -23,7 +23,7 @@ def test_current_trigger():
 def test_show_and_restore(pi, state):
     led = Led(pi, state_dir=state)
     assert led.original == {"trigger": "mmc0"} and not led.recovered
-    assert json.loads((state / "led.json").read_text()) == {"trigger": "mmc0"}
+    assert json.loads((state / "led.json").read_text()) == {"led": "ACT", "state": {"trigger": "mmc0"}}
     led.show("crit")
     assert act(pi, "trigger") == "timer\n"
     assert act(pi, "delay_on") == "100\n"
@@ -93,3 +93,32 @@ def test_old_name_led0(pi, state):
 def test_no_led(tmp_path):
     with pytest.raises(FileNotFoundError):
         Led(tmp_path, state_dir=tmp_path / "s")
+
+
+def test_saved_led_wins_over_config_name(pi, state):
+    """돌던 중 설정의 LED 이름을 바꾸고 죽어도, 기록에 적힌 처음 LED 를 되돌린다."""
+    import shutil
+    shutil.copytree(pi / "sys/class/leds/ACT", pi / "sys/class/leds/PWR")
+    Led(pi, "ACT", state_dir=state).show("crit")
+    led = Led(pi, "PWR", state_dir=state)
+    assert led.path.name == "ACT"
+    assert restore_saved(pi, state_dir=state) is True
+    assert act(pi, "trigger") == "mmc0\n"
+
+
+@pytest.mark.parametrize("text", [
+    "[1, 2]",
+    '{"led": "ACT"}',
+    '{"led": "ACT", "state": {"delay_on": "100"}}',
+    '{"led": "ACT", "state": {"trigger": "timer", "delay_on": 100}}',
+    '{"led": "ACT", "state": {"trigger": "mmc0", "evil": "1"}}',
+    '{"led": "../x", "state": {"trigger": "mmc0"}}',
+    "not json",
+])
+def test_broken_state_file_is_valueerror(pi, state, text):
+    state.mkdir()
+    (state / "led.json").write_text(text)
+    with pytest.raises(ValueError):
+        Led(pi, state_dir=state)
+    with pytest.raises(ValueError):
+        restore_saved(pi, state_dir=state)
