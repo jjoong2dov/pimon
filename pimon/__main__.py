@@ -154,13 +154,29 @@ def serve(root, cfg, config_path=config.DEFAULT_PATH):
                 srv.interval_s = new["interval_s"]
             log.info("설정 다시 읽음: %s interval=%ss", config_path, new["interval_s"])
 
-    def on_signal(signum, frame):
-        # 신호 처리기에서 Event.set 을 바로 부르면, 주 스레드가 Event.wait 안에서 같은 잠금을
-        # 쥔 순간에 걸릴 때 교착될 수 있다. 다른 스레드에서 세운다. 다시 읽기도 같은 이유로.
-        target = reload if signum == signal.SIGHUP else monitor.stop
-        threading.Thread(target=target, name="pimon-signal", daemon=True).start()
+    # 신호 처리기(signal.signal)를 쓰지 않는다. 처리기는 주 스레드에서만 도는데, 커널은 프로세스에 온
+    # 신호를 아무 스레드(web 요청 스레드 등)에나 넘길 수 있어, 그러면 Event.wait 로 잠든 주 스레드가
+    # 깨지 않고 interval_s 가 지나서야 처리된다. 그래서 다른 스레드를 띄우기 전에 신호를 막아(새 스레드는
+    # 막힌 상태를 물려받는다) 어느 스레드도 직접 받지 않게 하고, 전용 스레드가 sigwait 로 받는다.
+    sigs = {signal.SIGTERM, signal.SIGINT, signal.SIGHUP}
+    old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, sigs)
+    done = False
 
-    old = {s: signal.signal(s, on_signal) for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
+    def wait_signals():
+        while True:
+            signum = signal.sigwait(sigs)
+            if done:
+                return
+            try:
+                if signum == signal.SIGHUP:
+                    reload()
+                else:
+                    monitor.stop()
+            except Exception:                  # 이 스레드가 죽으면 그 뒤 신호를 아무도 못 받는다
+                log.exception("신호 %s 처리 실패", signum)
+
+    sig_thread = threading.Thread(target=wait_signals, name="pimon-signal", daemon=True)
+    sig_thread.start()
     try:
         with contextlib.ExitStack() as stack:
             led = _start_led(root, cfg)
@@ -180,8 +196,10 @@ def serve(root, cfg, config_path=config.DEFAULT_PATH):
         log.error("%s", e)
         return 1
     finally:
-        for s, h in old.items():
-            signal.signal(s, h)
+        done = True
+        signal.pthread_kill(sig_thread.ident, signal.SIGHUP)   # sigwait 를 깨워 끝낸다
+        sig_thread.join()
+        signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
     return 0
 
 
