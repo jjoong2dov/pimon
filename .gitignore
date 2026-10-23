@@ -3,3 +3,4 @@ __pycache__/
 .pytest_cache/
 fake/pi/
 fake/pc.toml
+fake/state/
