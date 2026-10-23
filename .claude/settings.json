@@ -1,0 +1,52 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/bin/python -m pytest *)",
+      "Bash(python3 fake/make_fake.py *)",
+      "Bash(python3 -m pimon *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)"
+    ],
+    "deny": [
+      "Bash(ssh *)",
+      "Bash(scp *)",
+      "Bash(sudo *)",
+      "Bash(systemctl *)",
+      "Bash(deploy/*)",
+      "Bash(./deploy/*)",
+      "Bash(bash deploy/*)",
+      "Bash(bash ./deploy/*)",
+      "Bash(sh deploy/*)",
+      "Bash(sh ./deploy/*)",
+      "Bash(python3 deploy/*)",
+      "Bash(python3 ./deploy/*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR}/.claude/hooks/block_sys_write.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR}/.claude/hooks/run_tests_after_edit.py\"",
+            "timeout": 180
+          }
+        ]
+      }
+    ]
+  }
+}
