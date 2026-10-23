@@ -6,7 +6,7 @@ listen = "0.0.0.0:8080"      # 웹 화면·API 주소(IPv4만). 집 밖에 열�
 iface = "eth0"               # 링크를 볼 인터페이스
 disk_path = "/"              # 사용률을 볼 디스크 경로
 throttle_source = "auto"     # auto | sysfs | vcgencmd | none
-state_dir = "/var/lib/pimon"   # LED 원래 상태 기록 (systemd StateDirectory)
+state_dir = "/run/pimon"       # LED 원래 상태 기록. 재부팅하면 비워지는 곳 (systemd RuntimeDirectory)
 
 [led]
 enabled = true               # ACT LED 로 상태 표시

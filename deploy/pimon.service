@@ -12,7 +12,9 @@ ExecReload=/bin/kill -HUP $MAINPID
 ExecStopPost=/usr/bin/python3 -m pimon restore-led --config /etc/pimon/pimon.toml
 Restart=on-failure
 RestartSec=5
-StateDirectory=pimon
+# LED 원래 상태 기록(/run/pimon/led.json). 다시 시작할 때는 남기고, 재부팅하면 비워진다.
+RuntimeDirectory=pimon
+RuntimeDirectoryPreserve=restart
 
 # LED 파일이 root 소유라 root 로 돈다. 대신 root 의 특권(capability)은 모두 버리고,
 # /sys 는 ACT LED 폴더만 쓸 수 있게 한다. root 로 도는 것은 남는 위험이다(12장).

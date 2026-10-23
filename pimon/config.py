@@ -8,7 +8,7 @@ from pathlib import PurePosixPath, Path
 
 DEFAULTS = {
     "root": "/",
-    "state_dir": "/var/lib/pimon",
+    "state_dir": "/run/pimon",
     "interval": 5.0,
     "listen": "127.0.0.1:8080",
     "iface": "eth0",

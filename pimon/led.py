@@ -76,7 +76,7 @@ def _apply_state(path, state):
 
 
 class Led:
-    def __init__(self, root="/", name="auto", state_dir="/var/lib/pimon"):
+    def __init__(self, root="/", name="auto", state_dir="/run/pimon"):
         self.state_file = Path(state_dir) / "led.json"
         if self.state_file.exists():
             # 기록에 적힌 LED 를 쓴다. 그사이 설정의 LED 이름이 바뀌었어도 처음 LED 를 되돌린다.
@@ -123,7 +123,7 @@ class Led:
         self.shown = None
 
 
-def restore_saved(root="/", state_dir="/var/lib/pimon"):
+def restore_saved(root="/", state_dir="/run/pimon"):
     """led.json 이 남아 있으면 거기 적힌 LED 를 그 상태로 되돌린다. 되돌렸으면 True."""
     state_file = Path(state_dir) / "led.json"
     if not state_file.exists():

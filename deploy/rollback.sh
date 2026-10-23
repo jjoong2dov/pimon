@@ -8,7 +8,7 @@ if [ "${2:-}" = "--remove" ]; then
 sudo systemctl disable --now pimon 2>/dev/null || true
 sudo rm -f /etc/systemd/system/pimon.service
 sudo systemctl daemon-reload
-sudo rm -rf /opt/pimon /var/lib/pimon
+sudo rm -rf /opt/pimon /run/pimon
 echo "pimon 지움 (/etc/pimon 은 남김)"
 REMOTE
   exit 0
