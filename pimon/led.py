@@ -20,6 +20,7 @@ pimon 에서 /sys 에 쓰는 곳은 이 파일 하나뿐이다. 쓰기는 모두
 
 LED 를 읽지 못하면 start() 가 LedError 를 낸다. 원래 상태를 모르면 아무것도 쓰지 않는다.
 그 밖의 쓰기 실패는 로그만 남기고 밖으로 내지 않으며, 다음 show(다음 tick)에서 다시 한다.
+쓰기 실패 로그는 파일(trigger·brightness)마다 실패가 시작될 때 경고 한 번, 회복될 때 정보 한 번만 남긴다.
 """
 
 import json
@@ -135,6 +136,7 @@ class Led:
         self.original = None
         self.mode = "ok"
         self._dirty = False      # LED 가 원래 상태와 다를 수 있음 (복구 실패 포함)
+        self._failing = set()    # 지금 쓰기가 실패 중인 파일 이름 (로그를 한 번만 남기려고)
 
     def __enter__(self):
         self.start()
@@ -153,12 +155,19 @@ class Led:
             f.write(text)
 
     def _try_write(self, name, text):
+        """실패해도 예외를 내지 않는다. 로그는 파일마다 실패가 시작될 때와 회복될 때 한 번씩만.
+        같은 파일을 두 스레드가 동시에 쓰는 일은 없으므로(_halt_thread 뒤에 _restore) 잠금은 필요 없다."""
         try:
             self._write(name, text)
-            return True
         except OSError as e:
-            log.warning("LED %s 쓰기 실패: %s", name, e)
+            if name not in self._failing:
+                self._failing.add(name)
+                log.warning("LED %s 쓰기 실패: %s (회복될 때까지 다시 남기지 않음)", name, e)
             return False
+        if name in self._failing:
+            self._failing.discard(name)
+            log.info("LED %s 쓰기 회복", name)
+        return True
 
     def _read_current(self):
         try:

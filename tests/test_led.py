@@ -342,6 +342,78 @@ def test_switch_after_failed_trigger_write_sets_trigger(fake_pi):
         assert led._thread.is_alive()
 
 
+# --- 쓰기 실패 로그: 실패가 시작될 때 한 번, 회복될 때 한 번 ---
+
+def blockable_writes(led):
+    """blocked 에 이름을 넣으면 그 파일 쓰기가 계속 실패한다."""
+    real = led._write
+    blocked = set()
+
+    def write(name, text):
+        if name in blocked:
+            raise PermissionError("쓰기 막힘")
+        real(name, text)
+
+    led._write = write
+    return blocked
+
+
+def led_logs(caplog, level):
+    return [r.getMessage() for r in caplog.records if r.name == "pimon.led" and r.levelno == level]
+
+
+def test_repeated_trigger_failure_warns_once_and_recovery_logs_once(fake_pi, caplog):
+    with caplog.at_level(logging.INFO, logger="pimon.led"):
+        with new_led(fake_pi) as led:
+            blocked = blockable_writes(led)
+            blocked.add("trigger")
+            for _ in range(5):                    # tick 다섯 번
+                led.show("crit")
+            assert len(led_logs(caplog, logging.WARNING)) == 1
+            assert "trigger" in led_logs(caplog, logging.WARNING)[0]
+            assert led_logs(caplog, logging.INFO) == []
+
+            blocked.clear()
+            for _ in range(3):
+                led.show("crit")
+            assert trigger(fake_pi) == "none"
+            infos = led_logs(caplog, logging.INFO)
+            assert len(infos) == 1 and "trigger" in infos[0]
+            assert len(led_logs(caplog, logging.WARNING)) == 1
+
+
+def test_repeated_brightness_failure_warns_once_even_if_trigger_succeeds(fake_pi, caplog):
+    """brightness 만 계속 실패하면 tick 마다 trigger 는 성공하고 스레드는 죽는다.
+    그래도 경고는 한 번이고 회복 로그가 끼어들지 않는다."""
+    with caplog.at_level(logging.INFO, logger="pimon.led"):
+        with new_led(fake_pi) as led:
+            blockable_writes(led).add("brightness")
+            for _ in range(5):
+                led.show("crit")
+                assert wait_for(lambda: not led._thread.is_alive())
+            warns = led_logs(caplog, logging.WARNING)
+            assert len(warns) == 1 and "brightness" in warns[0]
+            assert led_logs(caplog, logging.INFO) == []
+
+
+def test_failure_after_recovery_warns_again(fake_pi, caplog):
+    with caplog.at_level(logging.INFO, logger="pimon.led"):
+        with new_led(fake_pi) as led:
+            blocked = blockable_writes(led)
+            blocked.add("trigger")
+            led.show("crit")
+            led.show("crit")
+            blocked.clear()
+            led.show("crit")                      # 회복
+            blocked.add("trigger")
+            led.show("ok")                        # 다시 실패
+            led.show("ok")
+            blocked.clear()
+    assert len(led_logs(caplog, logging.WARNING)) == 2
+    assert len(led_logs(caplog, logging.INFO)) == 2     # 회복 두 번 (마지막은 stop 의 복구)
+    assert trigger(fake_pi) == "mmc0"
+
+
 # --- 기록 파일 (강제 종료 대비) ---
 
 def read_record(root):
