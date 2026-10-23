@@ -1,6 +1,6 @@
 """실행 입구.
 
-  python3 -m pimon [--root /] [--config /etc/pimon/pimon.toml]   주기 실행 (SIGTERM·SIGINT 로 끝냄)
+  python3 -m pimon [--root /] [--config /etc/pimon/pimon.toml]   주기 실행 (SIGTERM·SIGINT 로 끝냄, SIGHUP 으로 설정 다시 읽기)
   python3 -m pimon ... --once          한 번 수집·판정해 JSON 으로 출력
   python3 -m pimon ... --restore-led   기록 파일대로 LED 를 되돌림
   python3 -m pimon --restore-led --state-path /run/pimon/led.json
@@ -56,7 +56,25 @@ def main(argv=None):
     _setup_logging()
     if a.restore_led:
         return restore_led(a.root, cfg["led"]["state_path"])
-    return serve(a.root, cfg)
+    return serve(a.root, cfg, a.config)
+
+
+# SIGHUP 으로 다시 읽어도 반영하지 않는 키. 소켓·LED 기록은 시작 때 한 번 잡으므로 다시 시작해야 한다.
+RESTART_KEYS = (("http", "bind"), ("http", "port"), ("led", "enabled"), ("led", "state_path"))
+
+
+def reload_config(path, cur):
+    """설정 파일을 다시 읽어 (적용할 설정, 다시 시작해야 반영되는 바뀐 키 목록) 을 돌려준다.
+
+    RESTART_KEYS 는 cur 의 값을 그대로 둔다. 파일이 잘못됐으면 ConfigError (cur 는 건드리지 않음).
+    """
+    new = config.load(path)
+    pending = []
+    for sec, key in RESTART_KEYS:
+        if new[sec][key] != cur[sec][key]:
+            pending.append(f"{sec}.{key}")
+            new[sec][key] = cur[sec][key]
+    return new, pending
 
 
 def _setup_logging():
@@ -114,23 +132,41 @@ def _start_extras(monitor, cfg, stack):
     stack.callback(srv.shutdown)               # 먼저 불림: serve_forever 를 멈춤
     host, real_port = srv.server_address[:2]
     log.info("web: http://%s:%s/", host, real_port)
+    return srv
 
 
-def serve(root, cfg):
+def serve(root, cfg, config_path=config.DEFAULT_PATH):
     monitor = Monitor(root, cfg)
+    srv = None
+    reload_lock = threading.Lock()
+
+    def reload():
+        with reload_lock:                      # SIGHUP 이 겹쳐 와도 하나씩
+            try:
+                new, pending = reload_config(config_path, monitor.cfg)
+            except config.ConfigError as e:
+                log.error("설정 다시 읽기 실패, 이전 설정 유지: %s", e)
+                return
+            if pending:
+                log.warning("%s 바뀜: 다시 시작해야 반영 (지금은 이전 값으로 돎)", ", ".join(pending))
+            monitor.reload(new)
+            if srv is not None:
+                srv.interval_s = new["interval_s"]
+            log.info("설정 다시 읽음: %s interval=%ss", config_path, new["interval_s"])
 
     def on_signal(signum, frame):
         # 신호 처리기에서 Event.set 을 바로 부르면, 주 스레드가 Event.wait 안에서 같은 잠금을
-        # 쥔 순간에 걸릴 때 교착될 수 있다. 다른 스레드에서 세운다.
-        threading.Thread(target=monitor.stop, name="pimon-signal", daemon=True).start()
+        # 쥔 순간에 걸릴 때 교착될 수 있다. 다른 스레드에서 세운다. 다시 읽기도 같은 이유로.
+        target = reload if signum == signal.SIGHUP else monitor.stop
+        threading.Thread(target=target, name="pimon-signal", daemon=True).start()
 
-    old = {s: signal.signal(s, on_signal) for s in (signal.SIGTERM, signal.SIGINT)}
+    old = {s: signal.signal(s, on_signal) for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
     try:
         with contextlib.ExitStack() as stack:
             led = _start_led(root, cfg)
             if led is not None:
                 stack.callback(led.stop)
-            _start_extras(monitor, cfg, stack)
+            srv = _start_extras(monitor, cfg, stack)
 
             def on_status(status):
                 if led is not None:

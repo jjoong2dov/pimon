@@ -14,6 +14,10 @@ User=root
 WorkingDirectory=/opt/pimon
 Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStart=/usr/bin/python3 -m pimon --config /etc/pimon/pimon.toml
+# systemctl reload pimon: SIGHUP 으로 설정을 다시 읽는다. 기준값·interval_s·디스크 경로·iface 는
+# 곧바로 반영되고, http.bind·port 와 led.enabled·state_path 는 로그만 남긴다 (restart 해야 반영).
+# 새 설정이 잘못됐으면 오류 로그를 남기고 이전 설정으로 계속 돈다.
+ExecReload=/bin/kill -HUP $MAINPID
 # 정상 종료 뒤에도, 강제 종료(SIGKILL·OOM·예외로 죽음) 뒤에도 불린다.
 # 기록(/run/pimon/led.json)이 없으면 아무것도 하지 않고 0 으로 끝난다.
 # 정상 종료 때는 pimon 이 SIGTERM 처리기에서 이미 복구하고 기록을 지웠으므로 할 일이 없다.

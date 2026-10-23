@@ -1,4 +1,4 @@
-"""Monitor: tick() = 수집 → 판정 → 현재 상태 저장, run() = 주기 반복, stop().
+"""Monitor: tick() = 수집 → 판정 → 현재 상태 저장, run() = 주기 반복, stop(), reload(cfg).
 
 현재 상태는 잠금 아래에 두고, status() 는 복사본을 돌려준다 (web 스레드가 읽어도 안전).
 """
@@ -30,11 +30,14 @@ class Monitor:
         self._lock = threading.Lock()
         self._status = None
         self._stop = threading.Event()
+        self._wake = threading.Event()         # stop()·reload() 가 run() 의 대기를 깨운다
+        self._reloaded = False
 
     def tick(self):
         """한 번 수집·판정하고 현재 상태로 저장한 뒤 그 복사본을 돌려준다."""
+        cfg = self.cfg                         # 도중에 reload 되어도 한 tick 은 한 설정으로
         time = self._now().isoformat(timespec="seconds")
-        judged = judge_all(collect_all(self.root, self.cfg, statvfs=self._statvfs), self.cfg)
+        judged = judge_all(collect_all(self.root, cfg, statvfs=self._statvfs), cfg)
         status = {"time": time, **judged}
         with self._lock:
             self._status = status
@@ -48,6 +51,25 @@ class Monitor:
     def stop(self):
         """run() 을 멈춘다. 어느 스레드에서 불러도 되고, 대기 중이면 곧바로 깨운다."""
         self._stop.set()
+        self._wake.set()
+
+    def reload(self, cfg):
+        """설정을 바꾼다. 어느 스레드에서 불러도 되고, run() 은 곧바로 새 설정으로 tick 한 뒤
+        그 시각부터 새 interval_s 로 칸을 다시 센다."""
+        with self._lock:
+            self.cfg = cfg
+            self._reloaded = True
+            self._wake.set()
+
+    def _take_reload(self):
+        with self._lock:
+            self._wake.clear()                 # 잠금 안에서: reload() 와 엇갈려 깨움을 잃지 않게
+            reloaded, self._reloaded = self._reloaded, False
+        return reloaded
+
+    def _wait(self, timeout):
+        self._wake.wait(timeout)
+        return self._stop.is_set()
 
     def run(self, on_status=None, wait=None):
         """stop() 이 불릴 때까지 interval_s 마다 tick() 한다. 부른 스레드에서 돈다.
@@ -56,10 +78,10 @@ class Monitor:
           tick 이 간격보다 오래 걸려 칸을 놓치면 몰아서 돌지 않고 다음 칸까지 기다린다.
         - on_status(status): tick 이 성공할 때마다 같은 스레드에서 부른다 (LED 연동 등).
         - tick·on_status 가 예상 못 한 예외를 내면 로그만 남기고 계속 돈다.
+        - reload() 되면 대기를 끝내고 곧바로 tick 한다. interval_s 는 칸마다 지금 설정에서 읽는다.
         - wait(timeout) -> 멈춰야 하면 True. 시험용으로 바꿔 끼울 수 있고 기본은 Event.wait.
         """
-        wait = wait or self._stop.wait
-        interval = self.cfg["interval_s"]
+        wait = wait or self._wait
         next_t = self._clock()
         while not self._stop.is_set():
             try:
@@ -72,6 +94,7 @@ class Monitor:
                     on_status(status)
                 except Exception:
                     log.exception("on_status 실패")
+            interval = self.cfg["interval_s"]
             next_t += interval
             now = self._clock()
             if now >= next_t:
@@ -80,3 +103,5 @@ class Monitor:
                 next_t += missed * interval
             if wait(next_t - now):
                 break
+            if self._take_reload():
+                next_t = self._clock()

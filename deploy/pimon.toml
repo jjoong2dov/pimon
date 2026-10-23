@@ -1,5 +1,7 @@
 # pimon 예시 설정. 기본값과 같은 내용. /etc/pimon/pimon.toml 에 둔다.
 # 파일이 없으면 이 값들로 돈다. 모르는 키나 잘못된 값은 시작할 때 오류로 멈춘다.
+# 고친 뒤 systemctl reload pimon 으로 다시 읽는다 ([http], [led] 는 restart 해야 반영).
+# reload 때 잘못된 값이면 오류 로그만 남기고 이전 설정으로 계속 돈다.
 
 interval_s = 5
 

@@ -53,7 +53,7 @@ def dry_run(args, cfg):
     calls = []
     err = io.StringIO()
     with mock.patch.object(entry.config, "load", lambda path=None: cfg), \
-         mock.patch.object(entry, "serve", lambda root, c: calls.append(("serve", None)) or 0), \
+         mock.patch.object(entry, "serve", lambda root, c, path: calls.append(("serve", None)) or 0), \
          mock.patch.object(entry, "restore_led",
                            lambda root, path: calls.append(("restore_led", path)) or 0), \
          mock.patch.object(entry, "_setup_logging", lambda: None), \
