@@ -217,6 +217,7 @@ def test_web_serves_status_while_running(fake_pi, state, cfg, pimon):
     assert wait_for(lambda: seen.update(st=get_status(port)) or seen["st"] is not None), "web 이 뜨지 않음"
     assert seen["st"]["overall"] == "crit"
     assert seen["st"]["items"]["temp"]["value"]["c"] == 82
+    assert seen["st"]["interval_s"] == 0.05     # 설정의 주기가 화면까지 간다
     wait_blinking(fake_pi, state)
     code, err = finish(proc, signal.SIGTERM)
     assert code == 0, err

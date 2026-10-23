@@ -1,4 +1,6 @@
 import json
+import shutil
+import subprocess
 import threading
 import urllib.error
 import urllib.request
@@ -20,6 +22,8 @@ SAMPLE = {
         "temp": {"value": {"c": 71.0}, "error": None, "level": "warn", "reason": "71.0°C"},
     },
 }
+# /api/status 는 get_status 결과에 갱신 주기(interval_s)를 덧붙여 내놓는다
+SERVED = {**SAMPLE, "interval_s": DEFAULTS["interval_s"]}
 
 
 class _Stat:
@@ -28,11 +32,11 @@ class _Stat:
 
 @pytest.fixture
 def serve():
-    """serve(get_status) -> base URL. 시험이 끝나면 반드시 서버를 닫는다."""
+    """serve(get_status, **make_server 인자) -> base URL. 시험이 끝나면 반드시 서버를 닫는다."""
     started = []
 
-    def start(get_status):
-        srv = make_server(get_status, "127.0.0.1", 0)
+    def start(get_status, **kw):
+        srv = make_server(get_status, "127.0.0.1", 0, **kw)
         t = threading.Thread(target=srv.serve_forever, daemon=True)
         t.start()
         started.append((srv, t))
@@ -66,7 +70,7 @@ def test_status_json(serve):
     assert code == 200
     assert headers["Content-Type"] == "application/json; charset=utf-8"
     assert headers["Cache-Control"] == "no-store"
-    assert json.loads(body.decode("utf-8")) == SAMPLE
+    assert json.loads(body.decode("utf-8")) == SERVED
     assert "71.0°C" in body.decode("utf-8")  # ensure_ascii=False
     assert int(headers["Content-Length"]) == len(body)
 
@@ -75,7 +79,7 @@ def test_status_query_string_ignored(serve):
     base = serve(lambda: SAMPLE)
     code, _, body = fetch(base + "/api/status?x=1")
     assert code == 200
-    assert json.loads(body) == SAMPLE
+    assert json.loads(body) == SERVED
 
 
 def test_status_none_is_503(serve):
@@ -101,7 +105,7 @@ def test_status_exception_is_500_and_server_survives(serve):
     assert "error" in json.loads(body)
     code, _, body = fetch(base + "/api/status")
     assert code == 200
-    assert json.loads(body) == SAMPLE
+    assert json.loads(body) == SERVED
 
 
 def test_status_nan_is_500(serve):
@@ -166,6 +170,85 @@ def test_request_log_goes_to_logging(serve, caplog, capsys):
     assert "/api/status" not in capsys.readouterr().err
 
 
+# --- 갱신 주기 (interval_s) ---
+
+def test_status_carries_interval_s(serve):
+    base = serve(lambda: SAMPLE, interval_s=2.5)
+    code, _, body = fetch(base + "/api/status")
+    assert code == 200
+    assert json.loads(body) == {**SAMPLE, "interval_s": 2.5}
+    assert "interval_s" not in SAMPLE              # get_status 가 준 dict 를 고치지 않음
+
+
+def test_status_503_also_carries_interval_s(serve):
+    """수집 전에도 화면이 주기를 알 수 있게."""
+    base = serve(lambda: None, interval_s=7)
+    code, _, body = fetch(base + "/api/status")
+    assert code == 503
+    j = json.loads(body)
+    assert j["interval_s"] == 7 and "error" in j
+
+
+def test_interval_s_defaults_to_config_default(serve):
+    base = serve(lambda: SAMPLE)
+    _, _, body = fetch(base + "/api/status")
+    assert json.loads(body)["interval_s"] == DEFAULTS["interval_s"]
+
+
+def test_page_has_no_fixed_interval(serve):
+    base = serve(lambda: SAMPLE)
+    _, _, body = fetch(base + "/")
+    html = body.decode("utf-8")
+    assert "interval_s" in html
+    assert "setInterval" not in html               # 고정 주기 대신 응답마다 다음 갱신을 잡는다
+
+
+# page.html 의 스크립트를 node 로 돌려, 응답의 interval_s 로 다음 갱신(setTimeout)이 잡히는지 본다.
+NODE_HARNESS = r"""
+const fs = require("fs");
+const html = fs.readFileSync(process.argv[2], "utf8");
+const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+const cases = JSON.parse(process.argv[3]);
+(async () => {
+  const out = [];
+  for (const c of cases) {
+    const delays = [];
+    const el = () => ({ textContent: "", className: "", appendChild() {}, replaceChildren() {} });
+    const env = {
+      document: { getElementById: el, createElement: el },
+      fetch: async () => ({ ok: c.status === 200, status: c.status, json: async () => c.body }),
+      setTimeout: (fn, ms) => { delays.push(ms); },
+      setInterval: () => { throw new Error("setInterval"); },
+    };
+    new Function(...Object.keys(env), script)(...Object.values(env));
+    for (let i = 0; i < 20 && delays.length === 0; i++) await new Promise(r => setImmediate(r));
+    out.push(delays);
+  }
+  console.log(JSON.stringify(out));
+})();
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
+def test_page_follows_interval_s(tmp_path):
+    from pimon.web import PAGE_PATH
+    cases = [
+        (200, {**SAMPLE, "interval_s": 2.5}, 2500),     # 응답의 주기를 따른다
+        (200, {**SAMPLE, "interval_s": 30}, 30000),
+        (200, SAMPLE, 5000),                            # 없으면 기본 5초
+        (200, {**SAMPLE, "interval_s": "x"}, 5000),     # 이상한 값은 무시
+        (200, {**SAMPLE, "interval_s": 0.05}, 1000),    # 너무 짧으면 1초 (브라우저를 혹사하지 않게)
+        (503, {"error": "아직 수집 전", "interval_s": 2}, 2000),
+    ]
+    harness = tmp_path / "harness.js"
+    harness.write_text(NODE_HARNESS)
+    r = subprocess.run(["node", str(harness), str(PAGE_PATH),
+                        json.dumps([{"status": s, "body": b} for s, b, _ in cases])],
+                       capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout) == [[ms] for _, _, ms in cases]
+
+
 def test_make_server_does_not_serve_yet():
     srv = make_server(lambda: SAMPLE, "127.0.0.1", 0)
     try:
@@ -184,8 +267,9 @@ def test_with_real_monitor(serve, fake_pi):
     expected = mon.tick()
     code, _, body = fetch(base + "/api/status")
     assert code == 200
-    assert json.loads(body.decode("utf-8")) == expected
+    assert json.loads(body.decode("utf-8")) == {**expected, "interval_s": DEFAULTS["interval_s"]}
     assert json.loads(body)["items"]["temp"]["reason"] == "48.3°C"
+    assert "interval_s" not in mon.status()        # Monitor 의 상태 자체는 그대로
 
 
 # --- 동시 연결 제한 (Codex 검토 7) ---

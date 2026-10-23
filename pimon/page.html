@@ -28,7 +28,10 @@
 </table>
 <script>
 "use strict";
-const INTERVAL_MS = 5000;
+// 갱신 주기는 /api/status 의 interval_s 를 따른다. 받기 전이나 값이 이상하면 기본값.
+const DEFAULT_INTERVAL_MS = 5000;
+const MIN_INTERVAL_MS = 1000;   // 설정이 아주 짧아도 브라우저는 1초보다 자주 묻지 않는다
+let intervalMs = DEFAULT_INTERVAL_MS;
 const LEVELS = ["ok", "unknown", "warn", "crit"];
 
 function levelClass(level) {
@@ -69,23 +72,37 @@ function fail(msg) {
   document.getElementById("meta").textContent = msg + " (" + new Date().toLocaleTimeString() + ")";
 }
 
+function takeInterval(j) {
+  const s = j && j.interval_s;
+  if (typeof s === "number" && Number.isFinite(s) && s > 0) {
+    intervalMs = Math.max(MIN_INTERVAL_MS, s * 1000);
+  }
+}
+
 async function refresh() {
   try {
     const r = await fetch("/api/status", { cache: "no-store" });
     if (!r.ok) {
       let msg = "HTTP " + r.status;
-      try { const j = await r.json(); if (j.error) msg += ": " + j.error; } catch (e) {}
+      try { const j = await r.json(); takeInterval(j); if (j.error) msg += ": " + j.error; } catch (e) {}
       fail(msg);
       return;
     }
-    show(await r.json());
+    const st = await r.json();
+    takeInterval(st);
+    show(st);
   } catch (e) {
     fail("연결 실패");
   }
 }
 
-refresh();
-setInterval(refresh, INTERVAL_MS);
+// 응답을 받은 뒤 그때의 주기로 다음 갱신을 잡는다 (서비스 재시작으로 주기가 바뀌어도 따라감).
+async function loop() {
+  await refresh();
+  setTimeout(loop, intervalMs);
+}
+
+loop();
 </script>
 </body>
 </html>
