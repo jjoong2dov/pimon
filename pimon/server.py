@@ -24,12 +24,20 @@ async function tick(){
   try{
     const s = await (await fetch('status')).json();
     document.getElementById('level').textContent = s.level;
-    document.getElementById('level').className = s.level;
+    document.getElementById('level').className = s.level.replace(/[^a-z]/g, '');
     document.getElementById('meta').textContent = s.host + ' · ' + s.time;
-    const rows = Object.entries(s.checks).map(([k, c]) =>
-      `<tr><td>${k}</td><td>${c.value ?? ''} ${c.unit ?? ''}</td>` +
-      `<td class="${c.level}">${c.level}</td><td>${c.detail}</td></tr>`);
-    document.getElementById('rows').innerHTML = rows.join('');
+    // 값은 모두 textContent 로 넣는다. 수집값이 HTML 로 해석되지 않게.
+    const rows = Object.entries(s.checks).map(([k, c]) => {
+      const tr = document.createElement('tr');
+      for (const [text, cls] of [[k], [`${c.value ?? ''} ${c.unit ?? ''}`], [c.level, c.level], [c.detail]]) {
+        const td = document.createElement('td');
+        td.textContent = text;
+        if (cls) td.className = cls;
+        tr.appendChild(td);
+      }
+      return tr;
+    });
+    document.getElementById('rows').replaceChildren(...rows);
   }catch(e){
     document.getElementById('level').textContent = '연결 끊김';
     document.getElementById('level').className = 'unknown';

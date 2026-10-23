@@ -31,7 +31,7 @@ def _guard(fn):
     def wrapper(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
-        except (OSError, ValueError, subprocess.SubprocessError) as e:
+        except (OSError, ValueError, KeyError, IndexError, subprocess.SubprocessError) as e:
             return {"error": f"{type(e).__name__}: {e}"}
     wrapper.__name__ = fn.__name__
     return wrapper
@@ -57,14 +57,26 @@ def _vcgencmd_throttled():
     return int(m.group(1), 16)
 
 
+def _sysfs_throttled(root):
+    return int(_read(root, THROTTLE_SYSFS), 16)
+
+
 @_guard
 def throttled(root, source="auto"):
+    """auto 는 sysfs 를 먼저 읽고, 안 되면 vcgencmd 를 쓴다."""
     if source == "none":
         return {"skipped": True}
-    path = Path(root) / THROTTLE_SYSFS
-    if source == "sysfs" or (source == "auto" and path.exists()):
-        return decode_throttled(int(path.read_text().strip(), 16))
-    return decode_throttled(_vcgencmd_throttled())
+    if source == "sysfs":
+        return decode_throttled(_sysfs_throttled(root))
+    if source == "vcgencmd":
+        return decode_throttled(_vcgencmd_throttled())
+    try:
+        return decode_throttled(_sysfs_throttled(root))
+    except (OSError, ValueError) as first:
+        try:
+            return decode_throttled(_vcgencmd_throttled())
+        except (OSError, ValueError, subprocess.SubprocessError) as second:
+            raise OSError(f"sysfs: {first}; vcgencmd: {second}") from None
 
 
 @_guard
@@ -85,6 +97,8 @@ def mem(root):
         key, _, rest = line.partition(":")
         info[key] = int(rest.split()[0])
     total, avail = info["MemTotal"], info["MemAvailable"]
+    if total <= 0:
+        raise ValueError(f"MemTotal 이 이상함: {total}")
     return {"value": round(100.0 * (total - avail) / total, 1), "unit": "%",
             "avail_mb": avail // 1024}
 
@@ -96,9 +110,12 @@ def link(root, iface):
     result = {"value": state}
     if state == "up":
         try:
-            result["speed"] = int(_read(root, f"{base}/speed"))
+            speed = int(_read(root, f"{base}/speed"))
         except (OSError, ValueError):
-            pass
+            speed = -1
+        # 모르는 속도는 -1 로 읽히기도 한다. 양수만 싣는다.
+        if speed > 0:
+            result["speed"] = speed
     return result
 
 

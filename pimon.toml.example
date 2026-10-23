@@ -1,11 +1,12 @@
 # pimon 설정 견본. 파이에서는 /etc/pimon/pimon.toml 로 복사해 쓴다.
 # 빠진 값은 기본값을 쓴다. 고친 뒤: sudo systemctl reload pimon
 
-interval = 5                 # 몇 초마다 수집할지 (1 이상)
-listen = "0.0.0.0:8080"      # 웹 화면·API 주소. 집 밖에 열지 말 것
+interval = 5                 # 몇 초마다 수집할지 (1~3600)
+listen = "0.0.0.0:8080"      # 웹 화면·API 주소(IPv4만). 집 밖에 열지 말 것
 iface = "eth0"               # 링크를 볼 인터페이스
 disk_path = "/"              # 사용률을 볼 디스크 경로
 throttle_source = "auto"     # auto | sysfs | vcgencmd | none
+state_dir = "/var/lib/pimon"   # LED 원래 상태 기록 (systemd StateDirectory)
 
 [led]
 enabled = true               # ACT LED 로 상태 표시

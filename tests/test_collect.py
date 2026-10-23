@@ -69,3 +69,30 @@ def test_disk_percent_like_df(tmp_path):
     got = collect.disk(tmp_path, "/", statvfs=lambda p: St)
     # used=700, 쓸 수 있는 전체=700+250
     assert got["value"] == round(100 * 700 / 950, 1)
+
+
+def test_throttled_auto_falls_back_when_sysfs_garbage(pi, monkeypatch):
+    (pi / collect.THROTTLE_SYSFS).write_text("zz\n")
+    monkeypatch.setattr(subprocess, "run",
+                        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout="throttled=0x0\n"))
+    assert collect.throttled(pi, "auto")["value"] == "0x0"
+
+
+def test_throttled_auto_reports_both_failures(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", str(tmp_path))
+    err = collect.throttled(tmp_path, "auto")["error"]
+    assert "sysfs:" in err and "vcgencmd:" in err
+
+
+def test_meminfo_broken_is_error(pi):
+    (pi / "proc/meminfo").write_text("MemTotal: 100 kB\n")
+    assert collect.mem(pi)["error"].startswith("KeyError")
+    (pi / "proc/meminfo").write_text("MemTotal: 0 kB\nMemAvailable: 0 kB\n")
+    assert collect.mem(pi)["error"].startswith("ValueError")
+    (pi / "proc/meminfo").write_text("MemTotal:\n")
+    assert collect.mem(pi)["error"].startswith("IndexError")
+
+
+def test_unknown_speed_is_left_out(pi):
+    (pi / "sys/class/net/eth0/speed").write_text("-1\n")
+    assert collect.link(pi, "eth0") == {"value": "up"}
