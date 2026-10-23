@@ -6,6 +6,7 @@
 
 import copy
 import math
+import os
 import tomllib
 
 DEFAULT_PATH = "/etc/pimon/pimon.toml"
@@ -13,7 +14,8 @@ DEFAULT_PATH = "/etc/pimon/pimon.toml"
 DEFAULTS = {
     "interval_s": 5,
     "http": {"bind": "127.0.0.1", "port": 8080},
-    "led": {"enabled": True},
+    # state_path: 시작 때 LED 원래 상태를 적는 파일. --root 아래로 붙이지 않는 실제 경로.
+    "led": {"enabled": True, "state_path": "/run/pimon/led.json"},
     "temp": {"warn_c": 70, "crit_c": 80},
     "memory": {"warn_used_pct": 80, "crit_used_pct": 90},
     "disk": {"paths": ["/"], "warn_used_pct": 80, "crit_used_pct": 90},
@@ -97,6 +99,10 @@ def _check(cfg):
 
     if not isinstance(cfg["led"]["enabled"], bool):
         raise ConfigError(f"led.enabled: true/false 여야 함 ({cfg['led']['enabled']!r})")
+    state = cfg["led"]["state_path"]
+    if (not isinstance(state, str) or not os.path.isabs(state)
+            or not os.path.basename(state)):
+        raise ConfigError(f"led.state_path: '/' 로 시작하는 파일 경로여야 함 ({state!r})")
 
     _warn_crit("temp", cfg, "c")
     _warn_crit("memory", cfg, "used_pct", 0, 100)

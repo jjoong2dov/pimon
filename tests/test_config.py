@@ -18,7 +18,7 @@ def test_defaults_match_plan():
     assert DEFAULTS == {
         "interval_s": 5,
         "http": {"bind": "127.0.0.1", "port": 8080},
-        "led": {"enabled": True},
+        "led": {"enabled": True, "state_path": "/run/pimon/led.json"},
         "temp": {"warn_c": 70, "crit_c": 80},
         "memory": {"warn_used_pct": 80, "crit_used_pct": 90},
         "disk": {"paths": ["/"], "warn_used_pct": 80, "crit_used_pct": 90},
@@ -84,6 +84,10 @@ iface = "wlan0"
     ("[http]\nport = true\n", "http.port"),
     ('[http]\nbind = ""\n', "http.bind"),
     ("[led]\nenabled = 1\n", "led.enabled"),
+    ('[led]\nstate_path = ""\n', "led.state_path"),
+    ('[led]\nstate_path = "run/led.json"\n', "led.state_path"),     # 절대 경로만
+    ('[led]\nstate_path = "/run/pimon/"\n', "led.state_path"),      # 파일 이름 없음
+    ("[led]\nstate_path = 1\n", "led.state_path"),
     ("[temp]\nwarn_c = 80\ncrit_c = 80\n", "temp"),          # warn ≥ crit
     ("[temp]\nwarn_c = 85\n", "temp"),                       # 기본 crit 80 보다 큼
     ('[temp]\ncrit_c = "90"\n', "temp.crit_c"),
@@ -129,3 +133,13 @@ def test_non_utf8_file_is_config_error(tmp_path):
     with pytest.raises(ConfigError) as e:
         load(p)
     assert "UTF-8" in str(e.value)
+
+
+def test_deploy_example_matches_defaults():
+    from pathlib import Path
+    assert load(Path(__file__).resolve().parents[1] / "deploy" / "pimon.toml") == DEFAULTS
+
+
+def test_led_state_path_can_be_changed(tmp_path):
+    p = write(tmp_path, '[led]\nstate_path = "/var/lib/pimon/led.json"\n')
+    assert load(p)["led"] == {"enabled": True, "state_path": "/var/lib/pimon/led.json"}

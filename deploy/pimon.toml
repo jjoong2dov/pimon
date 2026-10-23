@@ -1,0 +1,30 @@
+# pimon 예시 설정. 기본값과 같은 내용. /etc/pimon/pimon.toml 에 둔다.
+# 파일이 없으면 이 값들로 돈다. 모르는 키나 잘못된 값은 시작할 때 오류로 멈춘다.
+
+interval_s = 5
+
+[http]
+bind = "127.0.0.1"     # 밖에서 보려면 "0.0.0.0" 등으로 바꿈. 인증 없음
+port = 8080
+
+[led]
+enabled = true
+# 시작 때 LED 원래 상태를 적는 파일 (강제 종료 뒤 복구용). --root 와 상관없는 실제 경로.
+# pimon.service 의 RuntimeDirectory=pimon (+ RuntimeDirectoryPreserve=yes) 과 맞출 것.
+state_path = "/run/pimon/led.json"
+
+[temp]                 # 파이 4 펌웨어는 80°C 부터 클럭을 내림
+warn_c = 70
+crit_c = 80
+
+[memory]
+warn_used_pct = 80
+crit_used_pct = 90
+
+[disk]
+paths = ["/"]          # root 아래로 이어 붙여 os.statvfs
+warn_used_pct = 80
+crit_used_pct = 90
+
+[link]
+iface = "eth0"

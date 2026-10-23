@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pimon</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 1.5rem; color: #222; }
+  h1 { font-size: 1.3rem; margin: 0 0 .5rem; }
+  #overall { display: inline-block; padding: .2rem .7rem; border-radius: .3rem; font-weight: bold; }
+  #meta { color: #666; font-size: .9rem; margin: .5rem 0 1rem; }
+  table { border-collapse: collapse; }
+  th, td { border: 1px solid #ccc; padding: .3rem .6rem; text-align: left; vertical-align: top; }
+  th { background: #f4f4f4; }
+  td.value { font-family: ui-monospace, monospace; font-size: .85rem; white-space: pre-wrap; }
+  .ok      { background: #d8f0d8; }
+  .unknown { background: #e4e4e4; }
+  .warn    { background: #fbe7b0; }
+  .crit    { background: #f5c0c0; }
+</style>
+</head>
+<body>
+<h1>pimon <span id="overall" class="unknown">-</span></h1>
+<div id="meta">불러오는 중...</div>
+<table>
+  <thead><tr><th>항목</th><th>판정</th><th>이유</th><th>값</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<script>
+"use strict";
+const INTERVAL_MS = 5000;
+const LEVELS = ["ok", "unknown", "warn", "crit"];
+
+function levelClass(level) {
+  return LEVELS.includes(level) ? level : "unknown";
+}
+
+function cell(text, cls) {
+  const td = document.createElement("td");
+  td.textContent = text;
+  if (cls) td.className = cls;
+  return td;
+}
+
+function show(st) {
+  const overall = document.getElementById("overall");
+  overall.textContent = String(st.overall);
+  overall.className = levelClass(st.overall);
+  document.getElementById("meta").textContent = "수집 시각 " + String(st.time);
+
+  const rows = document.getElementById("rows");
+  const fresh = [];
+  for (const [name, it] of Object.entries(st.items || {})) {
+    const tr = document.createElement("tr");
+    tr.appendChild(cell(name));
+    tr.appendChild(cell(String(it.level), levelClass(it.level)));
+    tr.appendChild(cell(it.reason == null ? "" : String(it.reason)));
+    const v = it.error ? "오류: " + it.error : JSON.stringify(it.value);
+    tr.appendChild(cell(v, "value"));
+    fresh.push(tr);
+  }
+  rows.replaceChildren(...fresh);
+}
+
+function fail(msg) {
+  const overall = document.getElementById("overall");
+  overall.textContent = "?";
+  overall.className = "unknown";
+  document.getElementById("meta").textContent = msg + " (" + new Date().toLocaleTimeString() + ")";
+}
+
+async function refresh() {
+  try {
+    const r = await fetch("/api/status", { cache: "no-store" });
+    if (!r.ok) {
+      let msg = "HTTP " + r.status;
+      try { const j = await r.json(); if (j.error) msg += ": " + j.error; } catch (e) {}
+      fail(msg);
+      return;
+    }
+    show(await r.json());
+  } catch (e) {
+    fail("연결 실패");
+  }
+}
+
+refresh();
+setInterval(refresh, INTERVAL_MS);
+</script>
+</body>
+</html>

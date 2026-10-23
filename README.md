@@ -15,3 +15,15 @@
 
 가짜 파이 폴더 안에는 실제 파이와 같은 경로에 파일이 있다
 (sys/class/thermal/thermal_zone0/temp, sys/class/leds/ACT/trigger, proc/meminfo 등).
+
+## 실행
+
+    python3 -m pimon --root fake/pi --config my.toml   # 주기 실행, http://127.0.0.1:8080/ (Ctrl-C 로 끝냄)
+    python3 -m pimon --root fake/pi --once             # 한 번 수집·판정해 JSON 출력
+    python3 -m pimon --restore-led                     # 기록 파일대로 ACT LED 되돌리기 (systemd ExecStopPost)
+
+설정 예시는 `deploy/pimon.toml`, systemd 유닛은 `deploy/pimon.service`.
+PC 에서 주기 실행할 때는 `[led] state_path` 를 쓸 수 있는 곳(예: `/tmp/pimon/led.json`)으로 바꾼다
+(기본 `/run/pimon/led.json` 은 보통 root 만 쓸 수 있다).
+
+시험: `.venv/bin/python -m pytest -q`

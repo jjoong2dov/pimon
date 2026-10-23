@@ -70,6 +70,127 @@ def test_real_clock_has_timezone(fake_pi):
     assert datetime.fromisoformat(st["time"]).tzinfo is not None
 
 
+# --- Monitor.run / stop: 가짜 시계와 주입한 대기 함수로 실제 대기 없이 ---
+
+class FakeTime:
+    """clock() 은 가짜 시각, wait(t) 는 시각을 t 만큼 앞당기고 기록한다. stop_after 번째 wait 에서 멈춘다."""
+
+    def __init__(self, m=None, stop_after=5):
+        self.t = 1000.0
+        self.waits = []
+        self.m = m
+        self.stop_after = stop_after
+
+    def clock(self):
+        return self.t
+
+    def wait(self, timeout):
+        self.waits.append(round(timeout, 6))
+        self.t += timeout
+        if len(self.waits) >= self.stop_after:
+            self.m.stop()
+        return self.m._stop.is_set()
+
+
+def timed_monitor(root, interval=5, stop_after=5, tick_cost=None):
+    cfg = {**DEFAULTS, "interval_s": interval}
+    ft = FakeTime(stop_after=stop_after)
+    m = Monitor(root, cfg, statvfs=lambda p: _Stat(), now=lambda: NOW, clock=ft.clock)
+    ft.m = m
+    if tick_cost is not None:                  # tick 이 걸리는 시간을 흉내
+        real = m.tick
+        costs = iter(tick_cost)
+
+        def slow_tick():
+            ft.t += next(costs, 0)
+            return real()
+        m.tick = slow_tick
+    return m, ft
+
+
+def test_run_ticks_every_interval_and_calls_on_status(fake_pi):
+    m, ft = timed_monitor(fake_pi, interval=5, stop_after=3)
+    seen = []
+    m.run(on_status=lambda st: seen.append(st["overall"]), wait=ft.wait)
+    assert seen == ["ok", "ok", "ok"]
+    assert ft.waits == [5, 5, 5]
+    assert m.status()["overall"] == "ok"
+
+
+def test_run_does_not_drift_when_tick_is_slow(fake_pi):
+    """tick 에 2초 걸리면 대기는 3초. 간격(5초)보다 오래 걸리면 밀린 만큼 건너뛰고 다음 칸에 맞춘다."""
+    m, ft = timed_monitor(fake_pi, interval=5, stop_after=4, tick_cost=[2, 0, 7, 1])
+    starts = []
+    m.run(on_status=lambda st: starts.append(ft.t), wait=ft.wait)
+    assert ft.waits == [3, 5, 3, 4]
+    # tick 시작 칸: 1000, 1005, 1010 (7초 걸려 1015 칸은 건너뜀), 1020. 값은 tick 이 끝난 시각
+    assert starts == [1002, 1005, 1017, 1021]
+
+
+def test_run_keeps_going_after_tick_error(fake_pi, caplog):
+    m, ft = timed_monitor(fake_pi, stop_after=3)
+    real = m.tick
+    calls = []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("뜻밖의 오류")
+        return real()
+    m.tick = flaky
+    seen = []
+    m.run(on_status=lambda st: seen.append(st["overall"]), wait=ft.wait)
+    assert len(calls) == 3
+    assert seen == ["ok", "ok"]                  # 실패한 tick 은 콜백 없음
+    assert "뜻밖의 오류" in caplog.text
+
+
+def test_run_keeps_going_after_callback_error(fake_pi, caplog):
+    m, ft = timed_monitor(fake_pi, stop_after=3)
+    calls = []
+
+    def bad(st):
+        calls.append(st)
+        raise ValueError("콜백 오류")
+    m.run(on_status=bad, wait=ft.wait)
+    assert len(calls) == 3
+    assert "콜백 오류" in caplog.text
+
+
+def test_run_follows_fake_pi_changes(fake_pi):
+    m, ft = timed_monitor(fake_pi, stop_after=2)
+    seen = []
+
+    def on_status(st):
+        seen.append(st["overall"])
+        make(fake_pi, temp=82)
+    m.run(on_status=on_status, wait=ft.wait)
+    assert seen == ["ok", "crit"]
+
+
+def test_stop_before_run_returns_without_tick(fake_pi):
+    m = monitor(fake_pi)
+    m.stop()
+    m.run(on_status=lambda st: pytest.fail("tick 하면 안 됨"))
+    assert m.status() is None
+
+
+def test_stop_from_other_thread_is_immediate(fake_pi):
+    """실제 Event.wait: interval 60초라도 stop() 하면 곧바로 돌아온다."""
+    import threading
+    import time
+    m = Monitor(fake_pi, {**DEFAULTS, "interval_s": 60}, statvfs=lambda p: _Stat())
+    ticked = threading.Event()
+    t = threading.Thread(target=m.run, kwargs={"on_status": lambda st: ticked.set()})
+    t.start()
+    assert ticked.wait(2)
+    start = time.monotonic()
+    m.stop()
+    t.join(2)
+    assert not t.is_alive()
+    assert time.monotonic() - start < 1
+
+
 # --- python -m pimon --once ---
 
 def run(capsys, *argv):
@@ -117,13 +238,6 @@ def test_bad_config_exits_2_with_message(fake_pi, tmp_path, capsys):
     assert code == 2
     assert out == ""
     assert "temp" in err
-
-
-def test_without_once_is_not_ready_yet(fake_pi, tmp_path, capsys):
-    """run 루프는 7단계. 그 전까지는 --once 없이 돌리면 아무것도 하지 않고 멈춘다."""
-    code, out, err = run(capsys, "--root", str(fake_pi), "--config", str(tmp_path / "없음.toml"))
-    assert code == 2
-    assert "--once" in err
 
 
 def test_once_does_not_write(fake_pi, tmp_path, capsys):

@@ -7,10 +7,21 @@ pimon 에서 /sys 에 쓰는 곳은 이 파일 하나뿐이다. 쓰기는 모두
 - 복구 순서: trigger 를 원래 값으로 쓰고, 원래 trigger 가 none 일 때만 brightness 도 쓴다.
   (실제 커널은 brightness 에 0 을 쓰면 걸려 있던 trigger 를 떼어 버린다.)
 
+강제 종료(SIGKILL·OOM) 대비 기록 파일 (state_path, 기본 /run/pimon/led.json):
+- start(): 기록이 있으면 그것을 원래 상태로 쓰고(지금 LED 가 none 이어도), 지금 LED 가
+  기록과 다르면 곧바로 기록대로 되돌린다. 기록이 없으면 지금 상태를 원자적으로 적는다.
+  기록이 깨졌으면 경고 후 지금 상태로 다시 적는다.
+- 기록을 쓸 수 없으면(디렉터리를 만들어도 안 되면) LedError. LED 는 건드리지 않는다.
+  기록 없이 깜빡이다 강제 종료되면 복구할 길이 없기 때문이다.
+- stop(): 복구에 성공하면 기록을 지운다. 실패하면 남겨 다음 시작이나 --restore-led 가 다시 한다.
+- restore_from_state(): 프로세스 밖(systemd ExecStopPost)에서 기록대로 되돌린다.
+기록 파일 경로는 --root 아래로 붙이지 않는다 (/run 은 가짜 파이가 흉내 낼 대상이 아님).
+
 LED 를 읽지 못하면 start() 가 LedError 를 낸다. 원래 상태를 모르면 아무것도 쓰지 않는다.
 그 밖의 쓰기 실패는 로그만 남기고 밖으로 내지 않는다.
 """
 
+import json
 import logging
 import os
 import threading
@@ -25,6 +36,10 @@ class LedError(Exception):
     pass
 
 
+class StateError(LedError):
+    """기록 파일이 깨졌거나 읽을 수 없음."""
+
+
 def parse_trigger(text):
     """trigger 파일에서 현재 값을 꺼낸다. 커널은 '... [mmc0] ...', 단어 하나만 있으면 그것."""
     words = text.split()
@@ -36,15 +51,89 @@ def parse_trigger(text):
     raise ValueError(f"trigger 형식 오류 {text!r}")
 
 
+# --- 기록 파일 ---
+
+def _valid_state(data):
+    if not isinstance(data, dict):
+        return False
+    trig, bright = data.get("trigger"), data.get("brightness")
+    return (isinstance(trig, str) and trig != "" and not any(c.isspace() or c in "[]/" for c in trig)
+            and isinstance(bright, str) and bright.isascii() and bright.isdigit())
+
+
+def load_state(path):
+    """기록 파일을 읽어 {"trigger", "brightness"} 를 돌려준다. 없으면 None, 깨졌으면 StateError."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as e:            # UnicodeDecodeError·JSONDecodeError 는 ValueError
+        raise StateError(f"{path}: LED 기록을 읽을 수 없음: {e}") from None
+    if not _valid_state(data):
+        raise StateError(f"{path}: LED 기록 형식 오류: {data!r}")
+    return {"trigger": data["trigger"], "brightness": data["brightness"]}
+
+
+def save_state(path, original):
+    """기록 파일을 원자적으로 쓴다 (같은 폴더의 임시 파일 + os.replace). 실패하면 OSError."""
+    path = os.fspath(path)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.tmp.{os.getpid()}"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"trigger": original["trigger"], "brightness": original["brightness"]}, f)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _remove_state(path):
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        log.warning("LED 기록 %s 지우기 실패: %s", path, e)
+
+
+def restore_from_state(root, state_path):
+    """기록 파일대로 LED 를 되돌리고 기록을 지운다 (python -m pimon --restore-led).
+
+    기록이 없으면 아무것도 하지 않고 False. 되돌렸으면 True.
+    기록이 깨졌으면 아무것도 쓰지 않고 StateError, 쓰기에 실패하면 기록을 남기고 LedError.
+    """
+    original = load_state(state_path)
+    if original is None:
+        return False
+    led = Led(root, state_path)
+    with led._lock:
+        led.original = original
+        ok = led._restore()
+    if not ok:
+        raise LedError(f"{led._dir}: LED 를 기록대로 되돌리지 못함 (기록 {state_path} 는 남겨 둠)")
+    _remove_state(state_path)
+    return True
+
+
 class Led:
-    def __init__(self, root, periods=PERIODS):
+    def __init__(self, root, state_path, periods=PERIODS):
         self._dir = os.path.join(root, LED_DIR)
+        self._state_path = os.fspath(state_path)
         self._periods = periods
         self._lock = threading.Lock()
         self._thread = None
         self._halt = None
         self.original = None
         self.mode = "ok"
+        self._dirty = False      # LED 가 원래 상태와 다를 수 있음 (복구 실패 포함)
 
     def __enter__(self):
         self.start()
@@ -70,17 +159,43 @@ class Led:
             log.warning("LED %s 쓰기 실패: %s", name, e)
             return False
 
-    def start(self):
-        """원래 상태를 읽어 둔다. 아무것도 쓰지 않는다."""
+    def _read_current(self):
         try:
             trigger = parse_trigger(self._read("trigger"))
             bright = self._read("brightness").strip()
             int(bright)
         except (OSError, ValueError) as e:
             raise LedError(f"{self._dir}: LED 를 읽을 수 없음: {e}") from None
+        return {"trigger": trigger, "brightness": bright}
+
+    def start(self):
+        """원래 상태를 정한다. 기록 파일이 있으면 그것, 없으면 지금 상태를 읽어 기록한다.
+
+        지금 LED 가 기록과 다를 때(앞선 pimon 이 강제 종료된 흔적)만 LED 에 쓴다.
+        """
+        current = self._read_current()
+        try:
+            saved = load_state(self._state_path)
+        except StateError as e:
+            log.warning("%s. 지금 LED 상태로 기록을 다시 씀", e)
+            saved = None
+        if saved is None:
+            try:
+                save_state(self._state_path, current)
+            except OSError as e:
+                raise LedError(f"{self._state_path}: LED 기록을 쓸 수 없음: {e}. "
+                               "LED 를 건드리지 않음") from None
+            original = current
+        else:
+            original = saved
         with self._lock:
-            self.original = {"trigger": trigger, "brightness": bright}
+            self.original = original
             self.mode = "ok"
+            self._dirty = False
+            if self._differs(current):
+                log.warning("LED 가 기록과 다름(%s → %s). 기록대로 되돌림",
+                            current["trigger"], original["trigger"])
+                self._restore()
 
     def show(self, level):
         """전체 판정에 맞춰 LED 를 바꾼다. 같은 판정이면 아무것도 하지 않는다."""
@@ -96,19 +211,27 @@ class Led:
             self.mode = mode
 
     def stop(self):
-        """깜빡임을 멈추고 원래 상태로 되돌린다. 여러 번 불러도 된다."""
+        """깜빡임을 멈추고 원래 상태로 되돌린다. 성공하면 기록을 지운다. 여러 번 불러도 된다."""
         with self._lock:
             if self.original is None:
                 return
             self._halt_thread()
-            if self.mode != "ok":
-                self._restore()
+            ok = self._restore() if self.mode != "ok" or self._dirty else True
+            if ok:
+                _remove_state(self._state_path)
             self.mode = "ok"
             self.original = None
+            self._dirty = False
 
     # 아래는 잠금을 쥔 채로 부른다.
 
+    def _differs(self, current):
+        if current["trigger"] != self.original["trigger"]:
+            return True
+        return self.original["trigger"] == "none" and current["brightness"] != self.original["brightness"]
+
     def _blink(self, mode):
+        self._dirty = True
         if self.mode == "ok" and not self._try_write("trigger", "none"):
             return
         on, off = self._periods[mode]
@@ -133,6 +256,9 @@ class Led:
             self._thread = self._halt = None
 
     def _restore(self):
-        self._try_write("trigger", self.original["trigger"])
-        if self.original["trigger"] == "none":
-            self._try_write("brightness", self.original["brightness"])
+        """원래 상태로 되돌린다. 필요한 쓰기가 모두 되면 True."""
+        ok = self._try_write("trigger", self.original["trigger"])
+        if ok and self.original["trigger"] == "none":
+            ok = self._try_write("brightness", self.original["brightness"])
+        self._dirty = not ok
+        return ok

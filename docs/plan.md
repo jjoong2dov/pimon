@@ -134,15 +134,21 @@ iface = "eth0"
 - `led.enabled = false` 면 LED 를 전혀 건드리지 않는다.
 - 복구는 trigger 를 먼저 쓰고, 원래 trigger 가 `none` 일 때만 brightness 를 쓴다 (커널은 brightness 0 쓰기에 trigger 를 떼어 버림).
 - LED 를 읽지 못하면(파일 없음, 형식 오류) 시작 때 `LedError`, 아무것도 쓰지 않는다.
-- **알려진 한계 (6단계 기준)**: SIGTERM 은 7단계 신호 처리 전까지 복구되지 않는다. SIGKILL·OOM·전원 차단은 프로세스 안에서 복구할 길이 없고,
-  깜빡이던 중이면 trigger 가 `none` 으로 남는다. 그 뒤 다시 시작한 pimon 은 `none` 을 원래 값으로 저장하므로 영영 `mmc0` 로 돌아가지 않는다
-  (`tests/test_led.py::test_restart_after_kill_restores_original` 이 xfail 로 기록). 대책은 결정 필요.
+- SIGTERM·SIGINT: 처리기가 감시 루프를 멈추고, 끝나면서 web 을 닫은 뒤 LED 를 복구한다. 종료 코드 0.
+- **강제 종료 대비 기록 파일** (결정 13): 시작 때 원래 trigger·brightness 를 `[led] state_path`(기본 `/run/pimon/led.json`, `--root` 와 무관한 실제 경로)에 원자적으로 적는다.
+  - 다시 시작할 때 기록이 있으면 지금 LED 값(`none` 일 수 있음) 대신 기록을 원래 값으로 쓰고, LED 가 기록과 다르면 곧바로 되돌린다.
+  - 정상 복구에 성공하면 기록을 지운다. 기록을 쓸 수 없으면 LED 를 건드리지 않고(LedError) LED 없이 감시를 계속한다.
+  - `python3 -m pimon --restore-led`: 기록대로 되돌리고 지운다. 기록이 없으면 아무것도 안 하고 0, 기록이 깨졌으면 아무것도 쓰지 않고 1. systemd `ExecStopPost` 에서 부른다.
+  - 남는 한계: 기록 파일이 깨졌는데 그때 LED 가 `none` 이면 `none` 을 원래 값으로 다시 적는다 (경고 로그). 설정 파일이 깨지면 `--restore-led` 도 2 로 멈춘다.
 
 ## 6. systemd
 
 - root 로 실행. 보안 옵션으로 좁힌다: `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`, `ReadWritePaths=` 에 ACT LED 폴더만.
 - `ProtectKernelTunables=yes` 는 `/sys` 를 읽기 전용으로 만들어 LED 쓰기를 막으므로 쓰지 않거나 LED 경로를 따로 열어야 한다. 실제 파이에서 확인 필요 (배포는 사람 확인 후).
-- `Restart=on-failure`. 끝날 때 SIGTERM 으로 LED 복구.
+- `Restart=on-failure`. 끝날 때 SIGTERM 으로 LED 복구, `ExecStopPost=... --restore-led` 로 강제 종료 뒤 복구.
+- `RuntimeDirectory=pimon` + **`RuntimeDirectoryPreserve=yes`** (기본값이면 재시작 때 `/run/pimon` 이 지워져 기록이 사라진다).
+- web 포트를 열 수 없으면 LED 를 복구하고 종료 코드 1 (systemd 가 다시 띄움).
+- 실제 LED 경로(`readlink -f /sys/class/leds/ACT`)와 `ReadWritePaths` 동작은 파이에서 확인 필요.
 
 ## 7. 가짜 파이로 시험하기
 
@@ -183,3 +189,4 @@ iface = "eth0"
 10. 개발 PC `.venv` 에 pytest 설치 허용. 3.12 호환 코드.
 11. 설정 파일 `/etc/pimon/pimon.toml`.
 12. 이력 저장·깜빡임 방지는 처음엔 뺌.
+13. LED 강제 종료 복구는 기록 파일 방식(제안 1): `/run/pimon/led.json`(설정 가능), 시작 때 기록 우선, `--restore-led` 를 ExecStopPost 에서.
