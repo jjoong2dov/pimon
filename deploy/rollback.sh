@@ -17,11 +17,13 @@ ssh "$HOST" sh -s <<'REMOTE'
 set -eu
 PREV=$(readlink /opt/pimon/previous) || { echo "되돌릴 전 판이 없음"; exit 1; }
 CUR=$(readlink /opt/pimon/current)
+# 먼저 멈춰야 지금 판의 ExecStopPost(LED 되돌리기)가 지금 판의 unit 과 코드로 돈다 (deploy.sh 의 switch 와 같은 순서)
+sudo systemctl stop pimon
 sudo ln -sfn "$PREV" /opt/pimon/current.new && sudo mv -T /opt/pimon/current.new /opt/pimon/current
 sudo ln -sfn "$CUR" /opt/pimon/previous
 sudo cp "$PREV/deploy/pimon.service" /etc/systemd/system/pimon.service
 sudo systemctl daemon-reload
-sudo systemctl restart pimon
+sudo systemctl start pimon
 sleep 3
 if (cd /opt/pimon/current && python3 -m pimon health --config /etc/pimon/pimon.toml); then
     echo "되돌림: $CUR -> $PREV"
