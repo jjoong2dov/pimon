@@ -43,6 +43,7 @@ python3 -m venv .venv && .venv/bin/pip install pytest
 | `replay` | 빈 저장소에서 장 순서대로 Claude Code 에게 일을 시킨 실제 기록. 책의 3~15장이 씁니다 |
 | `ch03-start` … `ch15-start` | `replay` 의 각 장 시작 상태 |
 | `v0-before-review`, `v0.1-review1`, `v0.2-review2` | 완성본이 Codex 검토를 거치며 바뀐 단계 |
+| `v0.3-pi` | 실제 파이에서 배포해 보고 드러난 빈틈을 고친 판(12장). `docs/pi-deploy-run.txt` 가 그 배포 기록 |
 
 ## 라이선스
 
