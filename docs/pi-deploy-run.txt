@@ -1,0 +1,150 @@
+
+### 0 손으로 설치해 둔 것 지우기 (rollback.sh --remove) 와 /etc/pimon 지우기
+
+$ sh deploy/rollback.sh pi@pilab-a.local --remove
+pimon 지움 (/etc/pimon 은 남김)
+(종료 코드 0)
+ls: cannot access '/etc/pimon': No such file or directory
+/opt:
+
+### 1 처음 배포
+
+$ time sh deploy/deploy.sh pi@pilab-a.local
+........................................................................ [ 93%]
+.....                                                                    [100%]
+77 passed in 28.15s
+설정 정상
+응답 정상: pilab-a ok
+배포 완료: 20261024-100138
+
+real	0m35.199s
+user	0m2.216s
+sys	0m0.424s
+(종료 코드 0)
+--- 파이 상태
+lrwxrwxrwx 1 root root   35 Oct 24 10:01 current -> /opt/pimon/releases/20261024-100138
+drwxr-xr-x 3 root root 4096 Oct 24 10:01 releases
+20261024-100138
+active
+[mmc0]
+
+$ curl -s http://pilab-a.local:8080/status | head -c 120; echo
+{"time": "2026-10-24T10:01:42+09:00", "host": "pilab-a", "level": "ok", "checks": {"temp": {"value": 51.1, "unit": "C", 
+(종료 코드 0)
+
+### 2 두 번째 배포 (같은 코드)
+
+$ sh deploy/deploy.sh pi@pilab-a.local 2>&1 | tail -3
+설정 정상
+응답 정상: pilab-a ok
+배포 완료: 20261024-100215
+(종료 코드 0)
+--- 파이 상태
+lrwxrwxrwx 1 root root   35 Oct 24 10:02 current -> /opt/pimon/releases/20261024-100215
+lrwxrwxrwx 1 root root   35 Oct 24 10:02 previous -> /opt/pimon/releases/20261024-100138
+drwxr-xr-x 4 root root 4096 Oct 24 10:02 releases
+20261024-100138
+20261024-100215
+active
+[mmc0]
+
+### 3 rollback.sh
+
+$ sh deploy/rollback.sh pi@pilab-a.local
+응답 정상: pilab-a ok
+되돌림: /opt/pimon/releases/20261024-100215 -> /opt/pimon/releases/20261024-100138
+(종료 코드 0)
+--- 파이 상태
+lrwxrwxrwx 1 root root   35 Oct 24 10:02 current -> /opt/pimon/releases/20261024-100138
+lrwxrwxrwx 1 root root   35 Oct 24 10:02 previous -> /opt/pimon/releases/20261024-100215
+drwxr-xr-x 4 root root 4096 Oct 24 10:02 releases
+20261024-100138
+20261024-100215
+active
+[mmc0]
+
+### 4 unit 의 ExecStart 를 틀리게 고친 판을 배포 (시험은 통과)
+
+$ git diff | grep '^[-+]Exec'
+-ExecStart=/usr/bin/python3 -m pimon run --config /etc/pimon/pimon.toml
++ExecStart=/usr/bin/python3 -m pimon serve --config /etc/pimon/pimon.toml
+(종료 코드 0)
+
+$ sh deploy/deploy.sh pi@pilab-a.local
+........................................................................ [ 93%]
+.....                                                                    [100%]
+77 passed in 27.86s
+설정 정상
+응답 없음: <urlopen error [Errno 111] Connection refused>
+응답 없음: <urlopen error [Errno 111] Connection refused>
+응답 없음: <urlopen error [Errno 111] Connection refused>
+응답 없음: <urlopen error [Errno 111] Connection refused>
+응답 없음: <urlopen error [Errno 111] Connection refused>
+새 판이 제대로 뜨지 않음. 최근 기록:
+Oct 24 10:03:02 pilab-a python3[7673]: LED 원래대로 (mmc0)
+Oct 24 10:03:02 pilab-a python3[7673]: 끝
+Oct 24 10:03:02 pilab-a python3[7982]: 되돌릴 기록 없음
+Oct 24 10:03:02 pilab-a systemd[1]: pimon.service: Deactivated successfully.
+Oct 24 10:03:02 pilab-a systemd[1]: Stopped pimon.service - pimon 라즈베리 파이 상태 모니터.
+Oct 24 10:03:02 pilab-a systemd[1]: Started pimon.service - pimon 라즈베리 파이 상태 모니터.
+Oct 24 10:03:02 pilab-a python3[7987]: usage: pimon [-h] [--config CONFIG] [--root ROOT] [--state-dir STATE_DIR]
+Oct 24 10:03:02 pilab-a python3[7987]:              {once,run,check-config,health,restore-led}
+Oct 24 10:03:02 pilab-a python3[7987]: pimon: error: argument command: invalid choice: 'serve' (choose from once, run, check-config, health, restore-led)
+Oct 24 10:03:02 pilab-a systemd[1]: pimon.service: Main process exited, code=exited, status=2/INVALIDARGUMENT
+Oct 24 10:03:03 pilab-a python3[7991]: 되돌릴 기록 없음
+Oct 24 10:03:03 pilab-a systemd[1]: pimon.service: Failed with result 'exit-code'.
+Oct 24 10:03:08 pilab-a systemd[1]: pimon.service: Scheduled restart job, restart counter is at 1.
+Oct 24 10:03:08 pilab-a systemd[1]: Started pimon.service - pimon 라즈베리 파이 상태 모니터.
+Oct 24 10:03:08 pilab-a python3[8000]: usage: pimon [-h] [--config CONFIG] [--root ROOT] [--state-dir STATE_DIR]
+Oct 24 10:03:08 pilab-a python3[8000]:              {once,run,check-config,health,restore-led}
+Oct 24 10:03:08 pilab-a python3[8000]: pimon: error: argument command: invalid choice: 'serve' (choose from once, run, check-config, health, restore-led)
+Oct 24 10:03:09 pilab-a systemd[1]: pimon.service: Main process exited, code=exited, status=2/INVALIDARGUMENT
+Oct 24 10:03:09 pilab-a python3[8003]: 되돌릴 기록 없음
+Oct 24 10:03:09 pilab-a systemd[1]: pimon.service: Failed with result 'exit-code'.
+전 판으로 되돌림: /opt/pimon/releases/20261024-100138
+응답 정상: pilab-a ok
+전 판으로 되돌렸고 응답 정상
+(종료 코드 1)
+--- 파이 상태
+lrwxrwxrwx 1 root root   35 Oct 24 10:03 current -> /opt/pimon/releases/20261024-100138
+lrwxrwxrwx 1 root root   35 Oct 24 10:02 previous -> /opt/pimon/releases/20261024-100215
+drwxr-xr-x 5 root root 4096 Oct 24 10:02 releases
+20261024-100138
+20261024-100215
+20261024-100257
+active
+[mmc0]
+Started pimon.service - pimon 라즈베리 파이 상태 모니터.
+usage: pimon [-h] [--config CONFIG] [--root ROOT] [--state-dir STATE_DIR]
+             {once,run,check-config,health,restore-led}
+pimon: error: argument command: invalid choice: 'serve' (choose from once, run, check-config, health, restore-led)
+pimon.service: Main process exited, code=exited, status=2/INVALIDARGUMENT
+되돌릴 기록 없음
+pimon.service: Failed with result 'exit-code'.
+Stopped pimon.service - pimon 라즈베리 파이 상태 모니터.
+Started pimon.service - pimon 라즈베리 파이 상태 모니터.
+LED ACT 사용 (원래 trigger: mmc0, 지금 상태)
+http://0.0.0.0:8080/ 에서 대기, 5초마다 수집
+상태 None -> ok
+
+$ curl -s http://pilab-a.local:8080/status | head -c 60; echo
+{"time": "2026-10-24T10:03:17+09:00", "host": "pilab-a", "le
+(종료 코드 0)
+
+### 5 재부팅 뒤
+
+$ systemctl is-enabled pimon; sudo systemctl reboot
+enabled
+
+
+$ uptime -p; systemctl is-active pimon; sudo journalctl -u pimon -b --no-pager -o cat | head -5; sudo ls -l /run/pimon; grep -o "\[[a-z0-9-]*\]" /sys/class/leds/ACT/trigger; curl -s 127.0.0.1:8080/status | head -c 70; echo
+up 0 minutes
+active
+Started pimon.service - pimon 라즈베리 파이 상태 모니터.
+LED ACT 사용 (원래 trigger: mmc0, 지금 상태)
+http://0.0.0.0:8080/ 에서 대기, 5초마다 수집
+상태 None -> ok
+total 4
+-rw-r--r-- 1 root root 44 Oct 24 10:03 led.json
+[mmc0]
+{"time": "2026-10-24T10:03:56+09:00", "host": "pilab-a", "level": "ok"

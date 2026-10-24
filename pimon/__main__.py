@@ -183,13 +183,17 @@ def cmd_restore_led(cfg):
     return 0
 
 
-def main(argv=None):
+def parser():
     p = argparse.ArgumentParser(prog="pimon", description="라즈베리 파이 상태 모니터")
     p.add_argument("command", choices=["once", "run", "check-config", "health", "restore-led"])
     p.add_argument("--config", help="설정 파일 (없으면 기본값)")
     p.add_argument("--root", help="설정의 root 를 덮어씀 (가짜 파이 폴더)")
     p.add_argument("--state-dir", help="설정의 state_dir 을 덮어씀")
-    args = p.parse_args(argv)
+    return p
+
+
+def main(argv=None):
+    args = parser().parse_args(argv)
 
     try:
         cfg = config.load(args.config)

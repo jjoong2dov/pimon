@@ -1,0 +1,30 @@
+검토 결과, 추가된 문법은 모두 dash에서 동작합니다. 다만 다음 빈틈이 남습니다.
+
+- **높음 — 설정 검사 실패 판은 계속 쌓임**  
+  `deploy/deploy.sh:41–42`에서 검사 실패 즉시 종료하지만 이미 만든 `$D`를 지우지 않습니다. 최초 배포 실패 경로(`88–91`)도 `$D`를 남깁니다. “실패한 판을 지운다”는 설명과 다릅니다.
+
+- **중간 — 일시적으로 한 번 응답하면 정상 판정**  
+  `deploy/deploy.sh:65`에서 첫 health 성공 즉시 반환합니다. 2초에 응답하고 3초에 죽는 판도 배포 성공입니다. 짧은 안정화 기간이나 연속 성공 검사가 필요합니다.
+
+- **중간 — `set +e` 뒤 중요한 실패가 무시됨**  
+  `deploy/deploy.sh:81–82`의 `previous` 갱신 및 `prune`, `95`의 실패 판 삭제가 실패해도 성공/되돌림 메시지와 종료 코드는 그대로입니다. 특히 `previous` 갱신 실패 후 prune하면 실제 직전 판이 보호되지 않을 수 있습니다.
+
+- **중간 — systemd 조회 실패를 서비스 상태로 구분하지 않음**  
+  `deploy/deploy.sh:55–62`에서 `systemctl show` 실패도 `set +e` 때문에 빈 문자열로 진행합니다. 두 번 모두 실패하면 재시작을 놓칠 수 있습니다. `base=$(restarts) || return 1`처럼 명시적으로 처리해야 합니다.
+
+- **중간 — 정지 시 새 판의 `ExecStopPost`가 실행될 수 있음**  
+  `deploy/deploy.sh:49`에서 먼저 `current`를 새 판으로 바꾸고 `53`에서 재시작합니다. systemd 재시작은 stop 후 start이며 `ExecStopPost`도 실행합니다. 따라서 기존 프로세스를 내리면서 새 판 코드가 `/opt/pimon/current`에서 실행됩니다(`pimon.service:8,12`). 새 판이 망가졌다면 LED 복구까지 실패할 수 있습니다. [systemd.service 공식 문서](https://freedesktop.org/software/systemd/man/latest/systemd.service.html)
+
+- **중간 — unit 시험은 명령의 의미를 검사하지 않음**  
+  `tests/test_unit_file.py:19–20,29–35`는 argparse가 인자를 받아들이는지만 봅니다. 예를 들어 `ExecStart=... pimon restore-led`도 통과합니다. `ExecStart`는 `run`, `ExecStopPost`는 `restore-led`라고 정확히 단언해야 합니다.
+
+- **낮음 — systemd 문법과 `shlex` 문법은 다름**  
+  `tests/test_unit_file.py:18`의 `shlex.split()`은 systemd의 Exec 명령 파서를 정확히 재현하지 않습니다. 접두 문자, `%` 지정자, `$` 확장, 연속 행 등을 놓칩니다. 가능하면 `systemd-analyze verify deploy/pimon.service` 시험을 추가하는 편이 안전합니다.
+
+- **낮음 — 종료 코드 설명이 완전히 보장되지 않음**  
+  `deploy/deploy.sh:32–38`의 원격 준비 단계는 `set -e` 상태입니다. `mkdir`, `tar`, `cp` 실패 코드가 그대로 SSH 종료 코드가 되어 문서의 1/2 의미와 충돌할 수 있습니다. 예컨대 `tar`의 2가 “서비스 수동 확인 필요”와 구분되지 않습니다.
+
+- **낮음 — prune 구현이 취약함**  
+  `deploy/deploy.sh:73`의 `for r in $(ls ...)`는 일반적으로 공백·개행·오류 처리에 취약합니다. 현재 스크립트가 만든 시각 이름만 존재한다면 실제 문제 가능성은 낮지만, 디렉터리 이름 규칙을 검사하거나 glob 기반으로 처리하는 편이 안전합니다.
+
+추가된 셸 구문(`$(( ))`, 함수, `case`, 줄바꿈 뒤 `||`)에는 dash 비호환 문법이 보이지 않습니다. `NRestarts`와 `is-active`로 즉시 죽은 서비스를 빨리 감지하려는 방향 자체는 맞습니다.
