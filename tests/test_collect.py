@@ -51,7 +51,7 @@ def test_throttled_none_is_skipped(pi):
 
 def test_link_down_has_no_speed(pi):
     make_fake.make(pi, link="down")
-    # 실제 커널은 링크가 내려가면 speed 읽기가 EINVAL 이다
+    # 실제 파이(커널 6.18)의 연결하지 않은 wlan0 에서는 down 일 때 speed 읽기가 EINVAL 이었다
     os.remove(pi / "sys/class/net/eth0/speed")
     assert collect.link(pi, "eth0") == {"value": "down"}
 

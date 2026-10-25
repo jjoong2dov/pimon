@@ -41,8 +41,8 @@ python3 -m venv .venv && .venv/bin/pip install pytest
 |---|---|
 | `main` | 검토를 거친 완성본. 책의 1장과 부록, 9·12장 이후가 주로 씁니다 |
 | `replay` | 빈 저장소에서 장 순서대로 Claude Code 에게 일을 시킨 실제 기록. 책의 3~15장이 씁니다 |
-| `ch03-start` … `ch15-start` | `replay` 의 각 장 시작 상태 |
-| `v0-before-review`, `v0.1-review1`, `v0.2-review2` | 완성본이 Codex 검토를 거치며 바뀐 단계 |
+| `ch03-start` … `ch12-start`, `ch14-start`, `ch15-start` | `replay` 의 각 장 시작 상태. 13장은 `ch12-start` 에서 시작하므로 `ch13-start` 는 없습니다. `ch03-init`, `ch10-hooks`, `ch11-skill`, `ch14-bug-start` 는 장 중간 상태입니다 |
+| `v0-before-review`, `v0.1-review1`, `v0.2-review2` | 완성본이 Codex 검토를 거치며 바뀐 단계. `v0.1-review1` 의 커밋 메시지는 "시그널 교착 수정"이라고 적었지만, 뒤에 다시 재 보니 교착(영영 멈춤)이 아니라 SIGHUP 직후의 SIGTERM 처리가 최대 수집 주기만큼 늦어지던 문제였습니다(시험 설정 30초에서 약 30.2초)(책 9·14장). 커밋 메시지는 이력이라 고치지 않았습니다 |
 | `v0.3-pi` | 실제 파이에서 배포해 보고 드러난 빈틈을 고친 판(12장). `docs/pi-deploy-run.txt` 가 그 배포 기록 |
 
 ## 라이선스

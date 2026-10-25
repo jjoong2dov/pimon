@@ -1,5 +1,7 @@
 # pimon 설정 견본. 파이에서는 /etc/pimon/pimon.toml 로 복사해 쓴다.
-# 빠진 값은 기본값을 쓴다. 고친 뒤: sudo systemctl reload pimon
+# 빠진 값은 기본값을 쓴다.
+# interval·limits·iface·disk_path·throttle_source 를 고친 뒤: sudo systemctl reload pimon
+# listen·root·state_dir·[led] 를 고친 뒤: sudo systemctl restart pimon (reload 로는 반영되지 않음)
 
 interval = 5                 # 몇 초마다 수집할지 (1~3600)
 listen = "0.0.0.0:8080"      # 웹 화면·API 주소(IPv4만). 집 밖에 열지 말 것
@@ -10,7 +12,9 @@ state_dir = "/run/pimon"       # LED 원래 상태 기록. 재부팅하면 비�
 
 [led]
 enabled = true               # ACT LED 로 상태 표시
-name = "auto"                # auto 는 ACT, led0 순서로 찾음
+name = "auto"                # auto 는 ACT, led0 순서로 찾음.
+                             # deploy/pimon.service 는 ACT 의 실제 경로만 쓰기를 열어 두므로,
+                             # 서비스로 돌릴 때는 ACT 만 시험했다(led0 만 있는 보드는 유닛도 고쳐야 함)
 
 [limits]
 temp_warn = 70.0             # 도
