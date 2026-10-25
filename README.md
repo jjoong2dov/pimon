@@ -27,3 +27,10 @@ PC 에서 주기 실행할 때는 `[led] state_path` 를 쓸 수 있는 곳(예:
 (기본 `/run/pimon/led.json` 은 보통 root 만 쓸 수 있다).
 
 시험: `.venv/bin/python -m pytest -q`
+
+## 이 가지에 대해
+
+이 `replay` 가지는 책 《라즈베리 파이 실습으로 익히는 Claude Code·Codex 협업 개발》에서 빈 저장소부터 장 순서대로 Claude Code 에게 일을 시킨 실제 기록입니다. 장 시작 상태는 태그(`ch03-start` … `ch12-start`, `ch14-start`, `ch15-start`)로 남겼습니다. 완성본은 `main` 가지에 있습니다.
+
+- 커밋 메시지는 그때 쓴 그대로 둡니다. `ch15-start` 커밋의 "SIGTERM 에 안 끝나던 버그"는 영영 멈춘 것이 아니라, SIGHUP 직후의 SIGTERM 처리가 최대 수집 주기만큼 늦어지던 문제였습니다(책 14장).
+- 장 중간의 `CLAUDE.md` 에는 일부러 고치지 않은 낡은 줄이 있습니다(책 3장).

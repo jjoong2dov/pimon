@@ -81,7 +81,7 @@ tests/
 | temp | `≥ crit_c` → crit, `≥ warn_c` → warn, 그 밖 ok |
 | throttle | 지금 비트(0~3) 하나라도 → crit, 과거 비트(16~19)만 → warn (재부팅 전까지 계속 warn), 없으면 ok |
 | memory | 사용률 = (Total − Available) / Total. `≥ crit_used_pct` → crit, `≥ warn_used_pct` → warn |
-| disk | 설정한 경로마다 사용률을 보고 가장 나쁜 것. 기준은 memory 와 같은 방식. 경로 하나라도 못 읽으면 unknown |
+| disk | 설정한 경로마다 사용률을 보고 가장 나쁜 것. 기준은 memory 와 같은 방식. 못 읽은 경로는 unknown 으로 치되, 다른 경로가 warn·crit 이면 더 나쁜 쪽이 이긴다(나머지가 모두 ok 일 때만 unknown) |
 | link | operstate 가 `up` 이 아니면 crit. 속도는 **값만 보여 주고 판정하지 않음** |
 | system | 부하·가동시간은 **보여 주기만**. 읽혔으면 항상 ok |
 
@@ -136,7 +136,7 @@ iface = "eth0"
 - `led.enabled = false` 면 LED 를 전혀 건드리지 않는다.
 - 복구는 trigger 를 먼저 쓰고, 원래 trigger 가 `none` 일 때만 brightness 를 쓴다 (커널은 brightness 0 쓰기에 trigger 를 떼어 버림).
 - LED 를 읽지 못하면(파일 없음, 형식 오류) 시작 때 `LedError`, 아무것도 쓰지 않는다.
-- SIGTERM·SIGINT: 처리기가 감시 루프를 멈추고, 끝나면서 web 을 닫은 뒤 LED 를 복구한다. 종료 코드 0.
+- SIGTERM·SIGINT: 시그널을 막아 두고 전용 `sigwait` 스레드가 받아 감시 루프를 멈추고(15장 시작 상태부터. 그 전에는 signal 처리기), 끝나면서 web 을 닫은 뒤 LED 를 복구한다. 종료 코드 0.
 - **강제 종료 대비 기록 파일** (결정 13): 시작 때 원래 trigger·brightness 를 `[led] state_path`(기본 `/run/pimon/led.json`, `--root` 와 무관한 실제 경로)에 원자적으로 적는다.
   - 다시 시작할 때 기록이 있으면 지금 LED 값(`none` 일 수 있음) 대신 기록을 원래 값으로 쓰고, LED 가 기록과 다르면 곧바로 되돌린다.
   - 정상 복구에 성공하면 기록을 지운다. 기록을 쓸 수 없으면 LED 를 건드리지 않고(LedError) LED 없이 감시를 계속한다.
@@ -145,8 +145,8 @@ iface = "eth0"
 
 ## 6. systemd
 
-- root 로 실행. 보안 옵션으로 좁힌다: `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`, `ReadWritePaths=` 에 ACT LED 폴더만.
-- `ProtectKernelTunables=yes` 는 `/sys` 를 읽기 전용으로 만들어 LED 쓰기를 막으므로 쓰지 않거나 LED 경로를 따로 열어야 한다. 실제 파이에서 확인 필요 (배포는 사람 확인 후).
+- root 로 실행. 보안 옵션으로 좁힌다: `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`, `ReadWritePaths=` 에 `/run/pimon` 과 ACT LED 의 실제 경로.
+- `ProtectKernelTunables=yes` 는 `/sys` 를 읽기 전용으로 만들어 LED 쓰기를 막으므로 쓰지 않거나 LED 경로를 따로 열어야 한다. 실제 파이에서 확인 필요 (배포는 사람 확인 후). → 책 12장에서 완성본(main)의 유닛으로 확인: `ProtectKernelTunables=yes` 와 ACT 실제 경로의 `ReadWritePaths=` 를 함께 두면 LED 쓰기가 된다(Pi OS trixie, 커널 6.18).
 - `Restart=on-failure`. 끝날 때 SIGTERM 으로 LED 복구, `ExecStopPost=... --restore-led` 로 강제 종료 뒤 복구.
 - `RuntimeDirectory=pimon` + **`RuntimeDirectoryPreserve=yes`** (기본값이면 재시작 때 `/run/pimon` 이 지워져 기록이 사라진다).
 - web 포트를 열 수 없으면 LED 를 복구하고 종료 코드 1 (systemd 가 다시 띄움).
